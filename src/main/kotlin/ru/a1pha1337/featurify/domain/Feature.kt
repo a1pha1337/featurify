@@ -12,6 +12,7 @@ data class Feature(
     val tenantId: UUID,
     val key: String,
     val type: FeatureType,
+    val groupKey: String? = null,
     val booleanValue: Boolean? = null,
     val enumValue: String? = null,
     val description: String = "",

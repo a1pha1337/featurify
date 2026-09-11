@@ -24,6 +24,7 @@ CREATE TABLE feature
 (
     id            UUID PRIMARY KEY       DEFAULT gen_random_uuid(),
     tenant_id     UUID          NOT NULL REFERENCES tenant (id),
+    group_key     VARCHAR(255),
     key           VARCHAR(255)  NOT NULL,
     type          VARCHAR(16)   NOT NULL,
     boolean_value BOOLEAN,
@@ -33,7 +34,9 @@ CREATE TABLE feature
     version       BIGINT        NOT NULL DEFAULT 0,
     created_at    TIMESTAMPTZ   NOT NULL,
     updated_at    TIMESTAMPTZ   NOT NULL,
-    CONSTRAINT uq_feature_tenant_key UNIQUE (tenant_id, key),
+    CONSTRAINT ck_feature_group_key CHECK (
+        group_key IS NULL OR group_key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
+        ),
     CONSTRAINT ck_feature_key CHECK (key ~ '^[a-z0-9.-]+$'),
     CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM')),
     CONSTRAINT ck_feature_status CHECK (status IN ('ACTIVE', 'ARCHIVED')),
@@ -44,7 +47,15 @@ CREATE TABLE feature
         )
 );
 
-CREATE INDEX ix_feature_tenant_status_key ON feature (tenant_id, status, key);
+CREATE UNIQUE INDEX uq_feature_tenant_group_key
+    ON feature (tenant_id, group_key, key)
+    WHERE group_key IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_feature_tenant_global_key
+    ON feature (tenant_id, key)
+    WHERE group_key IS NULL;
+
+CREATE INDEX ix_feature_tenant_status_key ON feature (tenant_id, status, group_key, key);
 
 CREATE INDEX ix_feature_key_trgm
     ON feature USING GIN (key gin_trgm_ops);
@@ -66,6 +77,7 @@ CREATE TABLE feature_audit_log
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id   UUID         NOT NULL REFERENCES tenant (id),
     tenant_key  VARCHAR(255) NOT NULL,
+    feature_group VARCHAR(255),
     feature_key VARCHAR(255) NOT NULL,
     operation   VARCHAR(32)  NOT NULL,
     old_value   VARCHAR(255),
@@ -76,7 +88,7 @@ CREATE TABLE feature_audit_log
 );
 
 CREATE INDEX ix_feature_audit_lookup
-    ON feature_audit_log (tenant_id, feature_key, changed_at DESC);
+    ON feature_audit_log (tenant_id, feature_group, feature_key, changed_at DESC);
 
 CREATE FUNCTION prevent_feature_type_change()
     RETURNS TRIGGER

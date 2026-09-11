@@ -69,8 +69,8 @@ docker compose up -d postgres keycloak
 
 ```text
 GET /api/v1/features?tenant={tenantKey}&page=0&size=20&query=checkout
-GET /api/v1/features/{key}?tenant={tenantKey}
-GET /api/v1/features:resolve?tenant={tenantKey}&keys=a,b,c
+GET /api/v1/features/{key}?tenant={tenantKey}&group={groupKey}
+GET /api/v1/features:resolve?tenant={tenantKey}&group={groupKey}&keys=a,b,c
 ```
 
 Admin endpoints принимают Keycloak Bearer token либо browser OAuth2 session:
@@ -79,9 +79,9 @@ Admin endpoints принимают Keycloak Bearer token либо browser OAuth2
 POST  /api/v1/tenants
 GET   /api/v1/tenants
 POST  /api/v1/features?tenant={tenantKey}
-PATCH /api/v1/features/{key}?tenant={tenantKey}
-POST  /api/v1/features/{key}/archive?tenant={tenantKey}
-GET   /api/v1/features/{key}/history?tenant={tenantKey}
+PATCH /api/v1/features/{key}?tenant={tenantKey}&group={groupKey}
+POST  /api/v1/features/{key}/archive?tenant={tenantKey}&group={groupKey}
+GET   /api/v1/features/{key}/history?tenant={tenantKey}&group={groupKey}
 ```
 
 Примеры тел запросов:
@@ -93,6 +93,7 @@ GET   /api/v1/features/{key}/history?tenant={tenantKey}
 ```json
 {
   "key": "checkout.payment-provider",
+  "group": "checkout",
   "type": "ENUM",
   "description": "Payment routing",
   "enumValue": "CAT",
@@ -122,6 +123,9 @@ GET   /api/v1/features/{key}/history?tenant={tenantKey}
 Список фич возвращается как Spring Data `Page`: элементы находятся в `content`, рядом передаются метаданные страницы и общее количество элементов.
 Номер страницы начинается с нуля, размер страницы по умолчанию равен 20; сортировка по умолчанию выполняется по `key`.
 Параметр `tenant` необязателен во всех feature endpoints: без него используется default tenant.
+Поле `group` при создании и query-параметр `group` в одиночных feature endpoints необязательны.
+Без группы фича считается глобальной в tenant; уникальность обеспечивается по `(tenant, group, key)`,
+причём для глобальных фич — отдельно по `(tenant, key)`.
 Поиск по `query` доступен начиная с трёх символов и использует триграммный индекс PostgreSQL.
 
 ## Проверка

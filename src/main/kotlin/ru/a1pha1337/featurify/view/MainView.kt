@@ -99,6 +99,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
             refreshFeatures()
         }
 
+        grid.addColumn { it.group ?: "Global" }.setHeader("Group").setAutoWidth(true)
         grid.addColumn { it.key }.setHeader("Key").setAutoWidth(true).setFlexGrow(1)
         grid.addColumn { it.type }.setHeader("Type").setAutoWidth(true)
         grid.addColumn { it.value }.setHeader("Value").setAutoWidth(true)
@@ -172,7 +173,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         createFeatureButton.isEnabled = true
     }
 
-    private fun pageRequest() = PageRequest.of(currentPage, PAGE_SIZE, Sort.by("key").ascending())
+    private fun pageRequest() = PageRequest.of(currentPage, PAGE_SIZE, Sort.by("groupKey", "key").ascending())
 
     private fun renderPagination(totalPages: Int, totalElements: Long, emptyMessage: String = "No features") {
         pagination.removeAll()
@@ -236,6 +237,11 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         val tenant = tenantSelect.value ?: return
         val dialog = Dialog("Create feature")
         val key = TextField("Key")
+        val group = TextField("Group").apply {
+            placeholder = "Global"
+            helperText = "Optional; leave empty for a tenant-wide feature"
+            maxLength = 255
+        }
         val type = ComboBox<FeatureType>("Type").apply {
             setItems(*FeatureType.entries.toTypedArray())
             value = FeatureType.BOOLEAN
@@ -252,7 +258,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         }
         type.addValueChangeListener { updateFields() }
         updateFields()
-        dialog.add(VerticalLayout(key, type, description, booleanValue, enumValue, enumOptions))
+        dialog.add(VerticalLayout(key, group, type, description, booleanValue, enumValue, enumOptions))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Create") {
             runUiAction {
@@ -263,6 +269,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                     CreateFeatureRequest(
                         key = key.value,
                         type = selectedType,
+                        group = group.value.trim().takeIf { it.isNotEmpty() },
                         description = description.value,
                         booleanValue = booleanValue.value.takeIf { selectedType == FeatureType.BOOLEAN },
                         enumValue = enumValue.value.takeIf { selectedType == FeatureType.ENUM },
@@ -278,7 +285,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openEditDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Edit ${feature.key}")
+        val dialog = Dialog("Edit ${featureName(feature)}")
         val description = TextArea("Description").apply { value = feature.description }
         val booleanValue = Checkbox("Enabled").apply {
             value = feature.value as? Boolean ?: false
@@ -296,6 +303,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                 service.patchFeature(
                     tenant.key,
                     feature.key,
+                    feature.group,
                     PatchFeatureRequest(
                         version = feature.version,
                         description = description.value,
@@ -312,12 +320,12 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openArchiveDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Archive ${feature.key}?")
+        val dialog = Dialog("Archive ${featureName(feature)}?")
         dialog.add(Paragraph("Archived features disappear from the public API and can be shown by selecting ARCHIVED in the status filter."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Archive") {
             runUiAction {
-                service.archive(tenant.key, feature.key, feature.version)
+                service.archive(tenant.key, feature.key, feature.group, feature.version)
                 dialog.close()
                 refreshFeatures()
             }
@@ -327,9 +335,9 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openHistoryDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("History: ${feature.key}")
+        val dialog = Dialog("History: ${featureName(feature)}")
         dialog.width = "850px"
-        val history = Grid(service.history(tenant.key, feature.key))
+        val history = Grid(service.history(tenant.key, feature.key, feature.group))
         history.addColumn { HISTORY_DATE_FORMATTER.format(it.changedAt) }.setHeader("Changed at").setAutoWidth(true)
         history.addColumn { it.operation }.setHeader("Operation").setAutoWidth(true)
         history.addColumn { it.oldValue }.setHeader("Old value")
@@ -341,6 +349,9 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
     }
 
     private fun selected(): AdminFeatureResponse? = grid.asSingleSelect().value
+
+    private fun featureName(feature: AdminFeatureResponse) =
+        feature.group?.let { "$it/${feature.key}" } ?: feature.key
 
     private fun runUiAction(action: () -> Unit) {
         try {

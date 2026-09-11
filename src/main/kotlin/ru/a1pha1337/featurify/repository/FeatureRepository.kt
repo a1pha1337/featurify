@@ -8,7 +8,8 @@ import ru.a1pha1337.featurify.domain.FeatureStatus
 import java.util.UUID
 
 interface FeatureRepository : CrudRepository<Feature, UUID> {
-    fun findByTenantIdAndKey(tenantId: UUID, key: String): Feature?
+    fun findByTenantIdAndGroupKeyAndKey(tenantId: UUID, groupKey: String, key: String): Feature?
+    fun findByTenantIdAndGroupKeyIsNullAndKey(tenantId: UUID, key: String): Feature?
     fun findAllByTenantIdAndStatus(tenantId: UUID, status: FeatureStatus, pageable: Pageable): Page<Feature>
     fun findAllByTenantIdAndStatusAndKeyContaining(
         tenantId: UUID,

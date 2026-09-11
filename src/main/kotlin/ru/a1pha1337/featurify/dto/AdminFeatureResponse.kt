@@ -5,6 +5,7 @@ import ru.a1pha1337.featurify.domain.FeatureType
 import java.time.Instant
 
 data class AdminFeatureResponse(
+    val group: String?,
     val key: String,
     val type: FeatureType,
     val value: Any,

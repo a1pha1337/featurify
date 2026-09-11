@@ -25,12 +25,14 @@ class PublicFeatureController(private val service: FeatureToggleService) {
     @GetMapping("/features/{key}")
     fun get(
         @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) group: String?,
         @PathVariable key: String,
-    ): FeatureResponse = service.getActive(tenant, key)
+    ): FeatureResponse = service.getActive(tenant, key, group)
 
     @GetMapping("/features:resolve")
     fun resolve(
         @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) group: String?,
         @RequestParam keys: String,
-    ): ResolveResponse = service.resolve(tenant, keys.split(',').map { it.trim() })
+    ): ResolveResponse = service.resolve(tenant, keys.split(',').map { it.trim() }, group)
 }

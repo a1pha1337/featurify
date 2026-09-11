@@ -4,6 +4,7 @@ import ru.a1pha1337.featurify.domain.AuditOperation
 import java.time.Instant
 
 data class AuditLogResponse(
+    val group: String?,
     val operation: AuditOperation,
     val oldValue: String?,
     val newValue: String?,

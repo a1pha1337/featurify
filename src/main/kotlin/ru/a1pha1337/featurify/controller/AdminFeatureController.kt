@@ -41,20 +41,23 @@ class AdminFeatureController(private val service: FeatureToggleService) {
     @PatchMapping("/features/{key}")
     fun patchFeature(
         @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) group: String?,
         @PathVariable key: String,
         @Valid @RequestBody request: PatchFeatureRequest,
-    ): AdminFeatureResponse = service.patchFeature(tenant, key, request)
+    ): AdminFeatureResponse = service.patchFeature(tenant, key, group, request)
 
     @PostMapping("/features/{key}/archive")
     fun archive(
         @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) group: String?,
         @PathVariable key: String,
         @Valid @RequestBody request: VersionRequest,
-    ): AdminFeatureResponse = service.archive(tenant, key, request.version)
+    ): AdminFeatureResponse = service.archive(tenant, key, group, request.version)
 
     @GetMapping("/features/{key}/history")
     fun history(
         @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) group: String?,
         @PathVariable key: String,
-    ): List<AuditLogResponse> = service.history(tenant, key)
+    ): List<AuditLogResponse> = service.history(tenant, key, group)
 }

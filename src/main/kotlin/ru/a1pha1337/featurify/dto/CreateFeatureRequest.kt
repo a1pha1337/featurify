@@ -12,6 +12,9 @@ data class CreateFeatureRequest(
     val key: String,
     @field:NotNull
     val type: FeatureType?,
+    @field:Size(max = 255)
+    @field:Pattern(regexp = ValidationPatterns.FEATURE_GROUP)
+    val group: String? = null,
     @field:Size(max = 2000)
     val description: String = "",
     val booleanValue: Boolean? = null,

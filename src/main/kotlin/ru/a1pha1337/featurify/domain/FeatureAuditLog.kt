@@ -10,6 +10,7 @@ data class FeatureAuditLog(
     @Id val id: UUID? = null,
     val tenantId: UUID,
     val tenantKey: String,
+    val featureGroup: String?,
     val featureKey: String,
     val operation: AuditOperation,
     val oldValue: String?,

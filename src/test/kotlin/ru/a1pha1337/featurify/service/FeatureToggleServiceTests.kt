@@ -76,10 +76,10 @@ class FeatureToggleServiceTests {
     @Test
     fun `stale version is rejected before update`() {
         val feature = booleanFeature(version = 5)
-        `when`(featureRepository.findByTenantIdAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
 
         assertThrows(ConflictException::class.java) {
-            service.patchFeature("blue", feature.key, PatchFeatureRequest(version = 4, booleanValue = true))
+            service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 4, booleanValue = true))
         }
 
         verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
@@ -88,11 +88,37 @@ class FeatureToggleServiceTests {
     @Test
     fun `archived feature is hidden from public read`() {
         val feature = booleanFeature(version = 2).copy(status = FeatureStatus.ARCHIVED)
-        `when`(featureRepository.findByTenantIdAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
 
         assertThrows(NotFoundException::class.java) {
-            service.getActive("blue", feature.key)
+            service.getActive("blue", feature.key, null)
         }
+    }
+
+    @Test
+    fun `grouped feature lookup uses tenant group and key`() {
+        val feature = booleanFeature(version = 2).copy(groupKey = "checkout")
+        `when`(
+            featureRepository.findByTenantIdAndGroupKeyAndKey(tenantId, "checkout", feature.key),
+        ).thenReturn(feature)
+
+        val result = service.getActive("blue", feature.key, "checkout")
+
+        assertEquals("checkout", result.group)
+        assertEquals(feature.key, result.key)
+        verify(featureRepository).findByTenantIdAndGroupKeyAndKey(tenantId, "checkout", feature.key)
+        verify(featureRepository, never()).findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)
+    }
+
+    @Test
+    fun `feature without group uses global lookup`() {
+        val feature = booleanFeature(version = 2)
+        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+
+        val result = service.getActive("blue", feature.key, null)
+
+        assertEquals(null, result.group)
+        verify(featureRepository).findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)
     }
 
     @Test
@@ -206,13 +232,13 @@ class FeatureToggleServiceTests {
             createdAt = now,
             updatedAt = now,
         )
-        `when`(featureRepository.findByTenantIdAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
         `when`(optionRepository.findAllByFeatureIdOrderBySortOrder(featureId)).thenReturn(
             listOf(FeatureEnumOption(UUID.randomUUID(), featureId, "CAT", 0)),
         )
 
         assertThrows(DomainValidationException::class.java) {
-            service.patchFeature("blue", feature.key, PatchFeatureRequest(version = 1, enumValue = "DOG"))
+            service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 1, enumValue = "DOG"))
         }
     }
 
