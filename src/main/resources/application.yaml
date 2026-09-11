@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: featurify
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/featurify}
+    username: ${DB_USERNAME:featurify}
+    password: ${DB_PASSWORD:featurify}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  flyway:
+    enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            provider: keycloak
+            client-id: ${KEYCLOAK_CLIENT_ID:featurify}
+            client-secret: ${KEYCLOAK_CLIENT_SECRET:change-me}
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            scope: openid,profile,email
+        provider:
+          keycloak:
+            authorization-uri: ${KEYCLOAK_PUBLIC_URL:${KEYCLOAK_BASE_URL:http://localhost:8081}}/realms/${KEYCLOAK_REALM:featurify}/protocol/openid-connect/auth
+            token-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_BASE_URL:http://localhost:8081}}/realms/${KEYCLOAK_REALM:featurify}/protocol/openid-connect/token
+            user-info-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_BASE_URL:http://localhost:8081}}/realms/${KEYCLOAK_REALM:featurify}/protocol/openid-connect/userinfo
+            jwk-set-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_BASE_URL:http://localhost:8081}}/realms/${KEYCLOAK_REALM:featurify}/protocol/openid-connect/certs
+            user-name-attribute: preferred_username
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_PUBLIC_URL:${KEYCLOAK_BASE_URL:http://localhost:8081}}/realms/${KEYCLOAK_REALM:featurify}
+          jwk-set-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_BASE_URL:http://localhost:8081}}/realms/${KEYCLOAK_REALM:featurify}/protocol/openid-connect/certs
+server:
+  shutdown: graceful
+  forward-headers-strategy: framework
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+vaadin:
+  launch-browser: false

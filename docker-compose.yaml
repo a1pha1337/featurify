@@ -1,0 +1,85 @@
+name: featurify
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-featurify}
+      POSTGRES_USER: ${POSTGRES_USER:-featurify}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-featurify}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-featurify} -d ${POSTGRES_DB:-featurify}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.3
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-featurify}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-featurify}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - ./docker/keycloak/featurify-realm.json:/opt/keycloak/data/import/featurify-realm.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c "{ printf 'HEAD /health/ready HTTP/1.0\r\n\r\n' >&0;
+          grep -q 'HTTP/1.0 200'; } 0<>/dev/tcp/127.0.0.1/9000"
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: featurify:local
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-featurify}
+      DB_USERNAME: ${POSTGRES_USER:-featurify}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-featurify}
+      KEYCLOAK_PUBLIC_URL: http://localhost:${KEYCLOAK_PORT:-8081}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: featurify
+      KEYCLOAK_CLIENT_ID: featurify
+      KEYCLOAK_CLIENT_SECRET: featurify-secret
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
