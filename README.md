@@ -68,9 +68,9 @@ docker compose up -d postgres keycloak
 Публичные endpoints не требуют токена:
 
 ```text
-GET /api/v1/tenants/{tenantKey}/features
-GET /api/v1/tenants/{tenantKey}/features/{key}
-GET /api/v1/tenants/{tenantKey}/features:resolve?keys=a,b,c
+GET /api/v1/features?tenant={tenantKey}&page=0&size=20&query=checkout
+GET /api/v1/features/{key}?tenant={tenantKey}
+GET /api/v1/features:resolve?tenant={tenantKey}&keys=a,b,c
 ```
 
 Admin endpoints принимают Keycloak Bearer token либо browser OAuth2 session:
@@ -78,16 +78,16 @@ Admin endpoints принимают Keycloak Bearer token либо browser OAuth2
 ```text
 POST  /api/v1/tenants
 GET   /api/v1/tenants
-POST  /api/v1/tenants/{tenantKey}/features
-PATCH /api/v1/tenants/{tenantKey}/features/{key}
-POST  /api/v1/tenants/{tenantKey}/features/{key}/archive
-GET   /api/v1/tenants/{tenantKey}/features/{key}/history
+POST  /api/v1/features?tenant={tenantKey}
+PATCH /api/v1/features/{key}?tenant={tenantKey}
+POST  /api/v1/features/{key}/archive?tenant={tenantKey}
+GET   /api/v1/features/{key}/history?tenant={tenantKey}
 ```
 
 Примеры тел запросов:
 
 ```json
-{"key":"blue","displayName":"Blue environment"}
+{"key":"blue","displayName":"Blue environment","defaultTenant":false}
 ```
 
 ```json
@@ -119,6 +119,10 @@ GET   /api/v1/tenants/{tenantKey}/features/{key}/history
 ```
 
 Устаревшая версия возвращает `409 Conflict`; неизвестная или архивная фича в публичном API — `404 Not Found`.
+Список фич возвращается как Spring Data `Page`: элементы находятся в `content`, рядом передаются метаданные страницы и общее количество элементов.
+Номер страницы начинается с нуля, размер страницы по умолчанию равен 20; сортировка по умолчанию выполняется по `key`.
+Параметр `tenant` необязателен во всех feature endpoints: без него используется default tenant.
+Поиск по `query` доступен начиная с трёх символов и использует триграммный индекс PostgreSQL.
 
 ## Проверка
 

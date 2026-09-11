@@ -17,11 +17,12 @@ class SecurityConfiguration(private val objectMapper: ObjectMapper) {
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http.authorizeHttpRequests { requests ->
             requests
-                .requestMatchers(HttpMethod.GET, "/api/v1/tenants/*/features").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/tenants/*/features/*").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/tenants/*/features:resolve").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/features").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/features/*").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/features:resolve").permitAll()
                 .requestMatchers("/actuator/health/**").permitAll()
                 .requestMatchers("/api/v1/tenants/**").authenticated()
+                .requestMatchers("/api/v1/features/**", "/api/v1/features").authenticated()
         }
         http.csrf { csrf -> csrf.ignoringRequestMatchers("/api/**") }
         http.oauth2ResourceServer { resourceServer ->

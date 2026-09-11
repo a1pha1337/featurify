@@ -10,4 +10,5 @@ data class TenantResponse(
     val active: Boolean,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val defaultTenant: Boolean,
 )

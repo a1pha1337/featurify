@@ -11,4 +11,5 @@ data class CreateTenantRequest(
     val key: String,
     @field:NotBlank @field:Size(max = 255)
     val displayName: String,
+    val defaultTenant: Boolean = false,
 )

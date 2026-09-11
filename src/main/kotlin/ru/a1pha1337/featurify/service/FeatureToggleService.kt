@@ -1,6 +1,8 @@
 package ru.a1pha1337.featurify.service
 
 import org.springframework.dao.OptimisticLockingFailureException
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
@@ -39,12 +41,14 @@ class FeatureToggleService(
     @Transactional
     fun createTenant(request: CreateTenantRequest): TenantResponse {
         val now = clock.instant()
+        if (request.defaultTenant) tenantRepository.clearDefault(now)
         return tenantRepository.save(
             Tenant(
                 key = request.key,
                 displayName = request.displayName,
                 createdAt = now,
                 updatedAt = now,
+                defaultTenant = request.defaultTenant,
             ),
         ).toResponse()
     }
@@ -53,7 +57,7 @@ class FeatureToggleService(
     fun listTenants(): List<TenantResponse> = tenantRepository.findAllByOrderByKey().map { it.toResponse() }
 
     @Transactional
-    fun createFeature(tenantKey: String, request: CreateFeatureRequest): AdminFeatureResponse {
+    fun createFeature(tenantKey: String?, request: CreateFeatureRequest): AdminFeatureResponse {
         val tenant = requireTenant(tenantKey)
         val type = request.type ?: throw validation("type", "must not be null")
         validateCreation(request, type)
@@ -82,21 +86,31 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun listActive(tenantKey: String): List<FeatureResponse> {
+    fun listActive(tenantKey: String?, pageable: Pageable, query: String?): Page<FeatureResponse> {
         val tenant = requireActiveTenant(tenantKey)
-        return featureRepository.findAllByTenantIdAndStatusOrderByKey(tenant.id!!, FeatureStatus.ACTIVE)
-            .map { it.toPublicResponse(optionsFor(it)) }
+        val normalizedQuery = normalizeQuery(query)
+        val features = if (normalizedQuery == null) {
+            featureRepository.findAllByTenantIdAndStatus(tenant.id!!, FeatureStatus.ACTIVE, pageable)
+        } else {
+            featureRepository.findAllByTenantIdAndStatusAndKeyContaining(
+                tenant.id!!,
+                FeatureStatus.ACTIVE,
+                normalizedQuery,
+                pageable,
+            )
+        }
+        return features.map { it.toPublicResponse(optionsFor(it)) }
     }
 
     @Transactional(readOnly = true)
-    fun getActive(tenantKey: String, key: String): FeatureResponse {
+    fun getActive(tenantKey: String?, key: String): FeatureResponse {
         val tenant = requireActiveTenant(tenantKey)
         val feature = requireActiveFeature(tenant.id!!, key)
         return feature.toPublicResponse(optionsFor(feature))
     }
 
     @Transactional(readOnly = true)
-    fun resolve(tenantKey: String, keys: List<String>): ResolveResponse {
+    fun resolve(tenantKey: String?, keys: List<String>): ResolveResponse {
         if (keys.isEmpty() || keys.any { it.isBlank() }) {
             throw validation("keys", "must contain at least one non-blank key")
         }
@@ -110,14 +124,30 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun listAllForAdmin(tenantKey: String): List<AdminFeatureResponse> {
+    fun listForAdmin(
+        tenantKey: String?,
+        pageable: Pageable,
+        statuses: Set<FeatureStatus>,
+        query: String?,
+    ): Page<AdminFeatureResponse> {
         val tenant = requireTenant(tenantKey)
-        return featureRepository.findAllByTenantIdOrderByKey(tenant.id!!)
-            .map { it.toAdminResponse(optionsFor(it)) }
+        if (statuses.isEmpty()) return Page.empty(pageable)
+        val normalizedQuery = normalizeQuery(query)
+        val features = if (normalizedQuery == null) {
+            featureRepository.findAllByTenantIdAndStatusIn(tenant.id!!, statuses, pageable)
+        } else {
+            featureRepository.findAllByTenantIdAndStatusInAndKeyContaining(
+                tenant.id!!,
+                statuses,
+                normalizedQuery,
+                pageable,
+            )
+        }
+        return features.map { it.toAdminResponse(optionsFor(it)) }
     }
 
     @Transactional
-    fun patchFeature(tenantKey: String, key: String, request: PatchFeatureRequest): AdminFeatureResponse {
+    fun patchFeature(tenantKey: String?, key: String, request: PatchFeatureRequest): AdminFeatureResponse {
         val tenant = requireTenant(tenantKey)
         val current = requireFeature(tenant.id!!, key)
         requireVersion(current, request.version)
@@ -147,7 +177,7 @@ class FeatureToggleService(
     }
 
     @Transactional
-    fun archive(tenantKey: String, key: String, version: Long?): AdminFeatureResponse {
+    fun archive(tenantKey: String?, key: String, version: Long?): AdminFeatureResponse {
         val tenant = requireTenant(tenantKey)
         val current = requireFeature(tenant.id!!, key)
         requireVersion(current, version)
@@ -162,7 +192,7 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun history(tenantKey: String, key: String): List<AuditLogResponse> {
+    fun history(tenantKey: String?, key: String): List<AuditLogResponse> {
         val tenant = requireTenant(tenantKey)
         requireFeature(tenant.id!!, key)
         return auditRepository.findAllByTenantIdAndFeatureKeyOrderByChangedAtDesc(tenant.id, key).map {
@@ -238,11 +268,16 @@ class FeatureToggleService(
         )
     }
 
-    private fun requireTenant(tenantKey: String): Tenant = tenantRepository.findByKey(tenantKey)
-        ?: throw NotFoundException("Tenant '$tenantKey' was not found")
+    private fun requireTenant(tenantKey: String?): Tenant = if (tenantKey == null) {
+        tenantRepository.findByDefaultTenantTrue()
+            ?: throw NotFoundException("Default tenant was not found")
+    } else {
+        tenantRepository.findByKey(tenantKey)
+            ?: throw NotFoundException("Tenant '$tenantKey' was not found")
+    }
 
-    private fun requireActiveTenant(tenantKey: String): Tenant = requireTenant(tenantKey).also {
-        if (!it.active) throw NotFoundException("Tenant '$tenantKey' was not found")
+    private fun requireActiveTenant(tenantKey: String?): Tenant = requireTenant(tenantKey).also {
+        if (!it.active) throw NotFoundException("Tenant '${tenantKey ?: it.key}' was not found")
     }
 
     private fun requireFeature(tenantId: UUID, key: String): Feature =
@@ -259,7 +294,13 @@ class FeatureToggleService(
         emptyList()
     }
 
-    private fun Tenant.toResponse() = TenantResponse(id!!, key, displayName, active, createdAt, updatedAt)
+    private fun normalizeQuery(query: String?): String? {
+        val normalized = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+        if (normalized.length < 3) throw validation("query", "must contain at least 3 characters")
+        return normalized
+    }
+
+    private fun Tenant.toResponse() = TenantResponse(id!!, key, displayName, active, createdAt, updatedAt, defaultTenant)
 
     private fun Feature.toPublicResponse(options: List<String>) = FeatureResponse(
         key = key,

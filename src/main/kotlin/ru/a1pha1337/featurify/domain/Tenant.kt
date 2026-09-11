@@ -13,4 +13,5 @@ data class Tenant(
     val active: Boolean = true,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val defaultTenant: Boolean = false,
 )
