@@ -13,6 +13,7 @@ import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
+import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.domain.Feature
@@ -47,6 +48,7 @@ class FeatureToggleServiceTests {
 
     @BeforeEach
     fun setUp() {
+        `when`(actorProvider.currentUsername()).thenReturn("test-user")
         service = FeatureToggleService(
             tenantRepository,
             featureRepository,
@@ -295,6 +297,99 @@ class FeatureToggleServiceTests {
         assertThrows(DomainValidationException::class.java) {
             service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 1, enumValue = "DOG"))
         }
+    }
+
+    @Test
+    fun `group creation normalizes input and saves an empty group`() {
+        `when`(groupRepository.save(org.mockito.ArgumentMatchers.any(FeatureGroup::class.java)))
+            .thenAnswer { invocation -> invocation.getArgument<FeatureGroup>(0).copy(id = UUID.randomUUID(), version = 0) }
+
+        val result = service.createGroup("blue", CreateFeatureGroupRequest(" checkout ", " Checkout "))
+
+        assertEquals("checkout", result.key)
+        assertEquals("Checkout", result.displayName)
+        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+    }
+
+    @Test
+    fun `group creation rejects blank name and duplicate key`() {
+        assertThrows(DomainValidationException::class.java) {
+            service.createGroup("blue", CreateFeatureGroupRequest("checkout", " "))
+        }
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(
+            FeatureGroup(UUID.randomUUID(), tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now),
+        )
+        assertThrows(ConflictException::class.java) {
+            service.createGroup("blue", CreateFeatureGroupRequest("checkout", "Checkout"))
+        }
+        verify(groupRepository, never()).save(org.mockito.ArgumentMatchers.any())
+    }
+
+    @Test
+    fun `moving grouped feature to global clears group id`() {
+        val groupId = UUID.randomUUID()
+        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val feature = booleanFeature(2).copy(groupId = groupId)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
+        `when`(featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
+            .thenAnswer { it.getArgument<Feature>(0) }
+
+        val result = service.moveFeature("blue", feature.key, "checkout", MoveFeatureRequest(2, null))
+
+        assertEquals(null, result.group)
+        val saved = ArgumentCaptor.forClass(Feature::class.java)
+        verify(featureRepository).save(saved.capture())
+        assertEquals(null, saved.value.groupId)
+    }
+
+    @Test
+    fun `move rejects occupied destination including archived features`() {
+        val groupId = UUID.randomUUID()
+        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val feature = booleanFeature(2)
+        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
+        `when`(featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key))
+            .thenReturn(feature.copy(id = UUID.randomUUID(), groupId = groupId, status = FeatureStatus.ARCHIVED))
+
+        assertThrows(ConflictException::class.java) {
+            service.moveFeature("blue", feature.key, null, MoveFeatureRequest(2, "checkout"))
+        }
+        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+    }
+
+    @Test
+    fun `group filter is applied before pagination and combined with search`() {
+        val groupId = UUID.randomUUID()
+        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val page = PageRequest.of(1, 20)
+        val statuses = setOf(FeatureStatus.ACTIVE)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
+        `when`(featureRepository.findAllByTenantIdAndGroupIdAndStatusInAndKeyContaining(
+            tenantId, groupId, statuses, "checkout", page,
+        )).thenReturn(PageImpl(emptyList(), page, 21))
+
+        val result = service.listForAdmin("blue", page, statuses, " CHECKOUT ", "checkout")
+
+        assertEquals(21, result.totalElements)
+        assertEquals(1, result.number)
+        verify(featureRepository).findAllByTenantIdAndGroupIdAndStatusInAndKeyContaining(
+            tenantId, groupId, statuses, "checkout", page,
+        )
+    }
+
+    @Test
+    fun `global filter does not include grouped features`() {
+        val page = PageRequest.of(0, 20)
+        val statuses = setOf(FeatureStatus.ACTIVE)
+        `when`(featureRepository.findAllByTenantIdAndGroupIdIsNullAndStatusIn(tenantId, statuses, page))
+            .thenReturn(PageImpl(listOf(booleanFeature(1)), page, 1))
+
+        val result = service.listForAdmin("blue", page, statuses, null, globalOnly = true)
+
+        assertEquals(null, result.content.single().group)
+        verify(featureRepository).findAllByTenantIdAndGroupIdIsNullAndStatusIn(tenantId, statuses, page)
     }
 
     private fun booleanFeature(version: Long) = Feature(

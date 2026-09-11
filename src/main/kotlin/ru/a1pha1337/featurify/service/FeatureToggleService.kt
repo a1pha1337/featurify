@@ -67,12 +67,18 @@ class FeatureToggleService(
     fun createGroup(tenantKey: String?, request: CreateFeatureGroupRequest): FeatureGroupResponse {
         val tenant = requireTenant(tenantKey)
         val key = normalizeGroup(request.key) ?: throw validation("key", "must not be blank")
+        if (request.displayName.isBlank() || request.displayName.length > 255) {
+            throw validation("displayName", "must contain between 1 and 255 characters")
+        }
+        if (groupRepository.findByTenantIdAndKey(tenant.id!!, key) != null) {
+            throw ConflictException("Group '$key' already exists in this tenant, possibly in the archive. Choose another key.")
+        }
         val now = clock.instant()
         return groupRepository.save(
             FeatureGroup(
                 tenantId = tenant.id!!,
                 key = key,
-                displayName = request.displayName,
+                displayName = request.displayName.trim(),
                 createdAt = now,
                 updatedAt = now,
             ),
@@ -122,6 +128,14 @@ class FeatureToggleService(
         val targetGroupKey = normalizeGroup(request.targetGroup)
         val targetGroup = targetGroupKey?.let { requireActiveGroup(tenant.id!!, it) }
         if (targetGroup?.id == current.groupId) return current.toAdminResponse(targetGroupKey, optionsFor(current))
+        val existing = if (targetGroup == null) {
+            featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenant.id, key)
+        } else {
+            featureRepository.findByTenantIdAndGroupIdAndKey(tenant.id, targetGroup.id!!, key)
+        }
+        if (existing != null) {
+            throw ConflictException("Feature '$key' already exists in ${targetGroupKey ?: "Global"}, possibly in the archive. Choose another group.")
+        }
         val saved = saveWithConflict(current.copy(groupId = targetGroup?.id, updatedAt = clock.instant()))
         return saved.toAdminResponse(targetGroupKey, optionsFor(saved))
     }
@@ -202,11 +216,30 @@ class FeatureToggleService(
         pageable: Pageable,
         statuses: Set<FeatureStatus>,
         query: String?,
+        group: String? = null,
+        globalOnly: Boolean = false,
     ): Page<AdminFeatureResponse> {
         val tenant = requireTenant(tenantKey)
         if (statuses.isEmpty()) return Page.empty(pageable)
         val normalizedQuery = normalizeQuery(query)
-        val features = if (normalizedQuery == null) {
+        val groupId = normalizeGroup(group)?.let { requireGroup(tenant.id!!, it).id!! }
+        val features = if (groupId != null) {
+            if (normalizedQuery == null) {
+                featureRepository.findAllByTenantIdAndGroupIdAndStatusIn(tenant.id!!, groupId, statuses, pageable)
+            } else {
+                featureRepository.findAllByTenantIdAndGroupIdAndStatusInAndKeyContaining(
+                    tenant.id!!, groupId, statuses, normalizedQuery, pageable,
+                )
+            }
+        } else if (globalOnly) {
+            if (normalizedQuery == null) {
+                featureRepository.findAllByTenantIdAndGroupIdIsNullAndStatusIn(tenant.id!!, statuses, pageable)
+            } else {
+                featureRepository.findAllByTenantIdAndGroupIdIsNullAndStatusInAndKeyContaining(
+                    tenant.id!!, statuses, normalizedQuery, pageable,
+                )
+            }
+        } else if (normalizedQuery == null) {
             featureRepository.findAllByTenantIdAndStatusIn(tenant.id!!, statuses, pageable)
         } else {
             featureRepository.findAllByTenantIdAndStatusInAndKeyContaining(

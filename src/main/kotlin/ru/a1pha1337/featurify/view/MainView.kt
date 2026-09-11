@@ -1,5 +1,7 @@
 package ru.a1pha1337.featurify.view
 
+import com.vaadin.flow.component.Component
+import com.vaadin.flow.component.HasValidation
 import com.vaadin.flow.component.button.Button
 import com.vaadin.flow.component.button.ButtonVariant
 import com.vaadin.flow.component.checkbox.Checkbox
@@ -7,6 +9,9 @@ import com.vaadin.flow.component.combobox.ComboBox
 import com.vaadin.flow.component.combobox.MultiSelectComboBox
 import com.vaadin.flow.component.dialog.Dialog
 import com.vaadin.flow.component.grid.Grid
+import com.vaadin.flow.component.html.Div
+import com.vaadin.flow.component.html.H2
+import com.vaadin.flow.component.html.Span
 import com.vaadin.flow.component.html.H1
 import com.vaadin.flow.component.html.Paragraph
 import com.vaadin.flow.component.notification.Notification
@@ -20,6 +25,12 @@ import com.vaadin.flow.data.value.ValueChangeMode
 import com.vaadin.flow.router.PageTitle
 import com.vaadin.flow.router.Route
 import jakarta.annotation.security.PermitAll
+import jakarta.validation.Validator
+import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
+import ru.a1pha1337.featurify.service.ConflictException
+import ru.a1pha1337.featurify.service.DomainValidationException
+import ru.a1pha1337.featurify.service.NotFoundException
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
@@ -39,21 +50,27 @@ import java.time.format.DateTimeFormatter
 @Route("")
 @PageTitle("Featurify")
 @PermitAll
-class MainView(private val service: FeatureToggleService) : VerticalLayout() {
+class MainView(private val service: FeatureToggleService, private val validator: Validator) : VerticalLayout() {
     private val tenantSelect = ComboBox<TenantResponse>("Tenant")
     private val grid = Grid<AdminFeatureResponse>()
     private val createFeatureButton = Button("New feature")
     private val createGroupButton = Button("New group")
     private val editButton = Button("Edit")
-    private val moveButton = Button("Move")
+    private val moveButton = Button("Move to group")
     private val archiveButton = Button("Archive")
-    private val archiveGroupButton = Button("Archive group")
-    private val groupsButton = Button("Groups")
+    private val groupsButton = Button("Manage groups")
     private val historyButton = Button("History")
-    private val groupSelect = ComboBox<FeatureGroupResponse>("Group")
+    private val groupSelect = ComboBox<GroupChoice>("Group")
     private val statusFilter = MultiSelectComboBox<FeatureStatus>("Statuses")
     private val keyFilter = TextField("Feature key")
     private val pagination = HorizontalLayout()
+    private val resultSummary = Span()
+    private val selectionSummary = Span("Select a feature to manage it")
+    private val emptyState = Div()
+    private var updatingControls = false
+    private data class GroupChoice(val key: String?, val label: String, val all: Boolean = false)
+    private val allGroups = GroupChoice(null, "All groups", all = true)
+    private val globalGroup = GroupChoice(null, "Global · no group")
     private var currentPage = 0
     private var groups: List<FeatureGroupResponse> = emptyList()
 
@@ -61,170 +78,222 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         private const val PAGE_SIZE = 20
         private const val VISIBLE_PAGE_BUTTONS = 7
         private val HISTORY_DATE_FORMATTER = DateTimeFormatter
-            .ofPattern("yyyy:MM:dd hh:mm xx")
+            .ofPattern("yyyy-MM-dd HH:mm 'UTC'")
             .withZone(ZoneOffset.UTC)
     }
 
     init {
         setSizeFull()
-        add(H1("Featurify"), Paragraph("PostgreSQL-backed feature configuration"))
+        addClassName("main-view")
+        isPadding = false
+        isSpacing = false
+
+        val brand = Div(Span("F").apply { addClassName("brand-mark") }, H1("Featurify"))
+            .apply { addClassName("brand") }
+        tenantSelect.setItemLabelGenerator { "${it.displayName}${if (it.defaultTenant) " · default" else ""}" }
+        tenantSelect.isAllowCustomValue = false
+        tenantSelect.addValueChangeListener {
+            if (!updatingControls) runUiAction {
+                currentPage = 0
+                refreshGroups(preserveSelection = false)
+                refreshFeatures()
+            }
+        }
+        val header = Div(brand, Div(tenantSelect, Button("New tenant") { openTenantDialog() })
+            .apply { addClassName("tenant-controls") }).apply { addClassName("app-header") }
 
         statusFilter.setItems(*FeatureStatus.entries.toTypedArray())
-        statusFilter.setItemLabelGenerator { it.name }
+        statusFilter.setItemLabelGenerator { statusLabel(it) }
         statusFilter.setValue(setOf(FeatureStatus.ACTIVE))
-        statusFilter.isClearButtonVisible = true
-        statusFilter.width = "240px"
-
-        keyFilter.placeholder = "At least 3 characters"
-        keyFilter.minLength = 3
+        statusFilter.addValueChangeListener { filtersChanged() }
+        keyFilter.placeholder = "Search by key…"
         keyFilter.maxLength = 255
+        keyFilter.helperText = "Enter at least 3 characters"
         keyFilter.isClearButtonVisible = true
         keyFilter.valueChangeMode = ValueChangeMode.LAZY
         keyFilter.valueChangeTimeout = 300
-        keyFilter.addValueChangeListener {
-            currentPage = 0
-            refreshFeatures()
-        }
+        keyFilter.addValueChangeListener { filtersChanged() }
+        groupSelect.setItemLabelGenerator { it.label }
+        groupSelect.addValueChangeListener { filtersChanged() }
 
-        tenantSelect.setItemLabelGenerator {
-            "${it.displayName} (${it.key})${if (it.defaultTenant) " · default" else ""}"
-        }
-        tenantSelect.addValueChangeListener {
-            currentPage = 0
-            refreshGroups()
-            refreshFeatures()
-        }
-        val createTenantButton = Button("New tenant") { openTenantDialog() }
-        createFeatureButton.addClickListener { openCreateFeatureDialog() }
-        createGroupButton.addClickListener { openCreateGroupDialog() }
-        groupsButton.addClickListener { openGroupsDialog() }
         createFeatureButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY)
-        groupSelect.setItemLabelGenerator { "${it.key} — ${it.displayName}" }
-        groupSelect.isClearButtonVisible = true
-        groupSelect.width = "240px"
-        groupSelect.addValueChangeListener { event ->
-            archiveGroupButton.isEnabled = event.value?.status == FeatureStatus.ACTIVE
-        }
-
-        editButton.isEnabled = false
-        moveButton.isEnabled = false
-        archiveButton.isEnabled = false
-        archiveGroupButton.isEnabled = false
-        historyButton.isEnabled = false
+        createFeatureButton.addClickListener { runUiAction { openCreateFeatureDialog() } }
+        createGroupButton.addClickListener { openCreateGroupDialog() }
+        groupsButton.addClickListener { runUiAction { openGroupsDialog() } }
         editButton.addClickListener { selected()?.let(::openEditDialog) }
-        moveButton.addClickListener { selected()?.let(::openMoveDialog) }
+        moveButton.addClickListener { selected()?.let { runUiAction { openMoveDialog(it) } } }
+        archiveButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
         archiveButton.addClickListener { selected()?.let(::openArchiveDialog) }
-        archiveGroupButton.addClickListener { groupSelect.value?.let(::openArchiveGroupDialog) }
-        historyButton.addClickListener { selected()?.let(::openHistoryDialog) }
-        statusFilter.addValueChangeListener {
+        historyButton.addClickListener { selected()?.let { runUiAction { openHistoryDialog(it) } } }
+        updateSelection(null)
+
+        grid.addComponentColumn { feature ->
+            Div(Span(feature.key).apply { addClassName("feature-key") },
+                Span(feature.description.ifBlank { "No description" }).apply { addClassName("feature-description") })
+                .apply { addClassName("feature-name") }
+        }.setHeader("Feature").setFlexGrow(2).setWidth("300px")
+        grid.addColumn { it.group ?: "Global" }.setHeader("Group").setWidth("170px").setFlexGrow(1)
+        grid.addColumn { if (it.type == FeatureType.BOOLEAN) "Boolean" else "Enum" }
+            .setHeader("Type").setWidth("110px").setFlexGrow(0)
+        grid.addComponentColumn { feature ->
+            val label = if (feature.type == FeatureType.BOOLEAN) {
+                if (feature.value == true) "Enabled" else "Disabled"
+            } else feature.value.toString()
+            Span(label).apply { addClassName("value-chip"); element.setAttribute("title", label) }
+        }.setHeader("Value").setWidth("150px").setFlexGrow(1)
+        grid.addComponentColumn { statusBadge(it.status) }
+            .setHeader("Status").setWidth("120px").setFlexGrow(0)
+        grid.setSizeFull()
+        grid.addClassName("feature-grid")
+        grid.asSingleSelect().addValueChangeListener { updateSelection(it.value) }
+        emptyState.addClassName("empty-state")
+        emptyState.element.setAttribute("role", "status")
+        resultSummary.addClassName("result-summary")
+        selectionSummary.addClassName("selection-summary")
+        selectionSummary.element.setAttribute("aria-live", "polite")
+        pagination.addClassName("pagination")
+        pagination.alignItems = Alignment.CENTER
+        pagination.width = "100%"
+        pagination.style.set("flex-wrap", "wrap")
+
+        val title = Div(H2("Features"), resultSummary).apply { addClassName("page-title") }
+        val actions = Div(groupsButton, createGroupButton, createFeatureButton).apply { addClassName("page-actions") }
+        val toolbar = Div(title, actions).apply { addClassName("page-toolbar") }
+        val filters = Div(keyFilter, groupSelect, statusFilter, Button("Reset filters") { resetFilters() })
+            .apply { addClassName("filters") }
+        val selection = Div(selectionSummary, Div(editButton, moveButton, historyButton, archiveButton)
+            .apply { addClassName("selection-actions") }).apply { addClassName("selection-bar") }
+        val table = VerticalLayout(selection, grid, emptyState, pagination).apply {
+            addClassName("table-panel")
+            isPadding = false
+            isSpacing = false
+            setSizeFull()
+            expand(grid)
+        }
+        val workspace = VerticalLayout(toolbar, filters, table).apply {
+            addClassName("workspace")
+            isPadding = false
+            setSizeFull()
+            expand(table)
+        }
+        add(header, workspace)
+        expand(workspace)
+        refreshTenants()
+    }
+
+    private fun filtersChanged() {
+        if (!updatingControls) runUiAction {
             currentPage = 0
             refreshFeatures()
         }
+    }
 
-        grid.addColumn { it.group ?: "Global" }.setHeader("Group").setAutoWidth(true)
-        grid.addColumn { it.key }.setHeader("Key").setAutoWidth(true).setFlexGrow(1)
-        grid.addColumn { it.type }.setHeader("Type").setAutoWidth(true)
-        grid.addColumn { it.value }.setHeader("Value").setAutoWidth(true)
-        grid.addColumn { it.status }.setHeader("Status").setAutoWidth(true)
-        grid.addColumn { it.description }.setHeader("Description").setFlexGrow(2)
-        grid.setSizeFull()
-        grid.asSingleSelect().addValueChangeListener { event ->
-            val selected = event.value
-            editButton.isEnabled = selected?.status == FeatureStatus.ACTIVE
-            moveButton.isEnabled = selected?.status == FeatureStatus.ACTIVE
-            archiveButton.isEnabled = selected?.status == FeatureStatus.ACTIVE
-            historyButton.isEnabled = selected != null
+    private fun resetFilters() {
+        updatingControls = true
+        try {
+            keyFilter.clear()
+            groupSelect.value = allGroups
+            statusFilter.setValue(setOf(FeatureStatus.ACTIVE))
+        } finally {
+            updatingControls = false
         }
+        filtersChanged()
+    }
 
-        pagination.alignItems = Alignment.CENTER
-
-        add(
-            HorizontalLayout(
-                tenantSelect,
-                createTenantButton,
-                createFeatureButton,
-                createGroupButton,
-                groupsButton,
-            ),
-            HorizontalLayout(
-                groupSelect,
-                editButton,
-                moveButton,
-                archiveButton,
-                archiveGroupButton,
-                historyButton,
-            ),
-            HorizontalLayout(statusFilter, keyFilter),
-            grid,
-            pagination,
-        )
-        expand(grid)
-        refreshTenants()
+    private fun updateSelection(feature: AdminFeatureResponse?) {
+        val active = feature?.status == FeatureStatus.ACTIVE
+        editButton.isEnabled = active
+        moveButton.isEnabled = active
+        archiveButton.isEnabled = active
+        historyButton.isEnabled = feature != null
+        selectionSummary.text = feature?.let { "Selected: ${featureName(it)}" } ?: "Select a feature to manage it"
     }
 
     private fun refreshTenants(selectTenantKey: String? = tenantSelect.value?.key) {
         val tenants = service.listTenants()
-        tenantSelect.setItems(tenants)
-        tenantSelect.value = tenants.firstOrNull { it.key == selectTenantKey }
-            ?: tenants.firstOrNull { it.defaultTenant }
-            ?: tenants.firstOrNull()
-        createFeatureButton.isEnabled = tenantSelect.value != null
-        createGroupButton.isEnabled = tenantSelect.value != null
-        groupsButton.isEnabled = tenantSelect.value != null
-        refreshGroups()
+        updatingControls = true
+        try {
+            tenantSelect.setItems(tenants)
+            tenantSelect.value = tenants.firstOrNull { it.key == selectTenantKey }
+                ?: tenants.firstOrNull { it.defaultTenant } ?: tenants.firstOrNull()
+        } finally {
+            updatingControls = false
+        }
+        currentPage = 0
+        refreshGroups(preserveSelection = false)
         refreshFeatures()
     }
 
-    private fun refreshGroups() {
+    private fun refreshGroups(preserveSelection: Boolean = true) {
+        val previous = groupSelect.value.takeIf { preserveSelection }
         groups = tenantSelect.value?.let { service.listGroups(it.key) } ?: emptyList()
-        groupSelect.setItems(groups.filter { it.status == FeatureStatus.ACTIVE })
-        if (groupSelect.value?.let { value -> groups.none { it.id == value.id && it.status == FeatureStatus.ACTIVE } } == true) {
-            groupSelect.clear()
+        val choices = listOf(allGroups, globalGroup) + groups.map {
+            GroupChoice(it.key, "${it.displayName} (${it.key})${if (it.status == FeatureStatus.ARCHIVED) " · archived" else ""}")
         }
-        archiveGroupButton.isEnabled = groupSelect.value?.status == FeatureStatus.ACTIVE
+        updatingControls = true
+        try {
+            groupSelect.setItems(choices)
+            groupSelect.value = choices.firstOrNull { it.key == previous?.key && it.all == previous?.all } ?: allGroups
+        } finally {
+            updatingControls = false
+        }
+    }
+
+    private fun selectGroup(key: String?) {
+        groupSelect.value = if (key == null) globalGroup else {
+            val group = groups.first { it.key == key }
+            GroupChoice(group.key, "${group.displayName} (${group.key})")
+        }
     }
 
     private fun refreshFeatures() {
+        grid.deselectAll()
+        updateSelection(null)
         val tenant = tenantSelect.value
-        if (tenant == null) {
-            grid.setItems(emptyList())
-            renderPagination(0, 0)
-            createFeatureButton.isEnabled = false
-            createGroupButton.isEnabled = false
-            groupsButton.isEnabled = false
-            groupSelect.clear()
-            archiveGroupButton.isEnabled = false
-            return
-        }
-
+        listOf(createFeatureButton, createGroupButton, groupsButton).forEach { it.isEnabled = tenant != null }
+        groupSelect.isEnabled = tenant != null
         val query = keyFilter.value.trim()
         val invalidQuery = query.isNotEmpty() && query.length < 3
         keyFilter.isInvalid = invalidQuery
         keyFilter.errorMessage = "Enter at least 3 characters"
-        if (invalidQuery) {
-            grid.deselectAll()
+        if (tenant == null || invalidQuery) {
             grid.setItems(emptyList())
-            renderPagination(0, 0, "Enter at least 3 characters")
+            renderPagination(0, 0)
+            showEmpty(if (tenant == null) "Create a tenant to get started" else "Keep typing to search",
+                if (tenant == null) "Use New tenant to create your workspace." else "Feature search requires at least 3 characters.")
             return
         }
-
-        var result = service.listForAdmin(tenant.key, pageRequest(), statusFilter.value, query)
+        val scope = groupSelect.value ?: allGroups
+        fun load() = service.listForAdmin(tenant.key, pageRequest(), statusFilter.value, query, scope.key, !scope.all && scope.key == null)
+        var result = load()
         if (result.totalPages > 0 && currentPage >= result.totalPages) {
             currentPage = result.totalPages - 1
-            result = service.listForAdmin(tenant.key, pageRequest(), statusFilter.value, query)
+            result = load()
         }
-        grid.deselectAll()
         grid.setItems(result.content)
         renderPagination(result.totalPages, result.totalElements)
-        createFeatureButton.isEnabled = true
+        if (result.isEmpty) {
+            showEmpty("No features here", if (statusFilter.value.isEmpty()) "Select at least one status to see features."
+                else "Create a feature in this group, or adjust your filters.")
+        } else {
+            grid.isVisible = true
+            emptyState.isVisible = false
+        }
+    }
+
+    private fun showEmpty(title: String, message: String) {
+        grid.isVisible = false
+        emptyState.isVisible = true
+        emptyState.removeAll()
+        emptyState.add(H2(title), Paragraph(message))
     }
 
     private fun pageRequest() = PageRequest.of(currentPage, PAGE_SIZE, Sort.by("groupId", "key").ascending())
 
-    private fun renderPagination(totalPages: Int, totalElements: Long, emptyMessage: String = "No features") {
+    private fun renderPagination(totalPages: Int, totalElements: Long) {
         pagination.removeAll()
+        resultSummary.text = "$totalElements features · ${groups.count { it.status == FeatureStatus.ACTIVE }} active groups"
         if (totalPages == 0) {
-            pagination.add(Paragraph(emptyMessage))
             return
         }
 
@@ -255,25 +324,26 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
     }
 
     private fun openTenantDialog() {
-        val dialog = Dialog("Create tenant")
+        val dialog = newDialog("Create tenant")
         val tenantKey = TextField("Tenant key")
         val displayName = TextField("Display name")
         val defaultTenant = Checkbox("Default tenant")
         tenantKey.isRequired = true
         displayName.isRequired = true
-        dialog.add(VerticalLayout(tenantKey, displayName, defaultTenant))
+        dialog.add(form(tenantKey, displayName, defaultTenant))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Create") {
             runUiAction {
                 service.createTenant(
-                    CreateTenantRequest(
-                        key = tenantKey.value,
-                        displayName = displayName.value,
+                    validated(CreateTenantRequest(
+                        key = tenantKey.value.trim(),
+                        displayName = displayName.value.trim(),
                         defaultTenant = defaultTenant.value,
-                    ),
+                    ), mapOf("key" to tenantKey, "displayName" to displayName)),
                 )
                 dialog.close()
-                refreshTenants(tenantKey.value)
+                refreshTenants(tenantKey.value.trim())
+                success("Tenant created")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
         dialog.open()
@@ -281,19 +351,17 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openCreateFeatureDialog() {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Create feature")
-        val key = TextField("Key")
-        val group = ComboBox<FeatureGroupResponse>("Group").apply {
-            setItems(groups.filter { it.status == FeatureStatus.ACTIVE })
-            setItemLabelGenerator { "${it.key} — ${it.displayName}" }
-            isClearButtonVisible = true
-            helperText = "Optional; empty means Global"
+        val dialog = newDialog("Create feature")
+        refreshGroups()
+        val key = TextField("Key").apply { isRequired = true; maxLength = 255; helperText = "Lowercase letters, digits, dots and hyphens" }
+        val group = groupPicker("Group").apply {
+            value = activeGroupChoices().firstOrNull { it.key == groupSelect.value?.key } ?: globalGroup
         }
         val type = ComboBox<FeatureType>("Type").apply {
             setItems(*FeatureType.entries.toTypedArray())
             value = FeatureType.BOOLEAN
         }
-        val description = TextArea("Description")
+        val description = TextArea("Description").apply { maxLength = 2000 }
         val booleanValue = Checkbox("Enabled")
         val enumValue = TextField("Current enum value")
         val enumOptions = TextField("Allowed values (comma-separated)")
@@ -305,7 +373,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         }
         type.addValueChangeListener { updateFields() }
         updateFields()
-        dialog.add(VerticalLayout(key, group, type, description, booleanValue, enumValue, enumOptions))
+        dialog.add(form(key, group, type, description, booleanValue, enumValue, enumOptions))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Create") {
             runUiAction {
@@ -313,18 +381,19 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                 val options = enumOptions.value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
                 service.createFeature(
                     tenant.key,
-                    CreateFeatureRequest(
-                        key = key.value,
+                    validated(CreateFeatureRequest(
+                        key = key.value.trim(),
                         type = selectedType,
                         group = group.value?.key,
                         description = description.value,
                         booleanValue = booleanValue.value.takeIf { selectedType == FeatureType.BOOLEAN },
                         enumValue = enumValue.value.takeIf { selectedType == FeatureType.ENUM },
                         enumOptions = options.takeIf { selectedType == FeatureType.ENUM } ?: emptyList(),
-                    ),
+                    ), mapOf("key" to key, "type" to type, "description" to description)),
                 )
                 dialog.close()
                 refreshFeatures()
+                success("Changes saved")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
         dialog.open()
@@ -332,70 +401,102 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openCreateGroupDialog() {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Create feature group")
-        val key = TextField("Group key").apply { isRequired = true; maxLength = 255 }
-        val displayName = TextField("Display name").apply { isRequired = true; maxLength = 255 }
-        dialog.add(VerticalLayout(key, displayName))
+        val dialog = newDialog("Create group")
+        val key = TextField("Group key").apply {
+            isRequired = true
+            maxLength = 255
+            placeholder = "checkout"
+            helperText = "Lowercase letters, digits, dots or hyphens; start and end with a letter or digit"
+        }
+        val displayName = TextField("Display name").apply { isRequired = true; maxLength = 255; placeholder = "Checkout" }
+        dialog.add(form(Paragraph("New group in ${tenant.displayName}"), key, displayName))
         dialog.footer.add(Button("Cancel") { dialog.close() })
-        dialog.footer.add(Button("Create") {
+        dialog.footer.add(Button("Create group") {
             runUiAction {
-                service.createGroup(
-                    tenant.key,
-                    CreateFeatureGroupRequest(key = key.value, displayName = displayName.value),
-                )
-                dialog.close()
+                val created = service.createGroup(tenant.key, validated(
+                    CreateFeatureGroupRequest(key.value.trim(), displayName.value.trim()),
+                    mapOf("key" to key, "displayName" to displayName),
+                ))
                 refreshGroups()
+                resetFilters()
+                selectGroup(created.key)
+                dialog.close()
+                success("Group '${created.displayName}' created")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
         dialog.open()
+        key.focus()
     }
 
     private fun openGroupsDialog() {
         if (tenantSelect.value == null) return
         refreshGroups()
-        val dialog = Dialog("Feature groups")
-        dialog.width = "700px"
+        val dialog = newDialog("Manage groups")
+        dialog.width = "800px"
         val groupGrid = Grid<FeatureGroupResponse>()
-        groupGrid.addColumn { it.key }.setHeader("Key").setAutoWidth(true)
-        groupGrid.addColumn { it.displayName }.setHeader("Name").setFlexGrow(1)
-        groupGrid.addColumn { it.status }.setHeader("Status").setAutoWidth(true)
-        groupGrid.addColumn { it.version }.setHeader("Version").setAutoWidth(true)
+        groupGrid.addColumn { it.displayName }.setHeader("Name").setFlexGrow(1).setWidth("180px")
+        groupGrid.addColumn { it.key }.setHeader("Key").setWidth("160px")
+        groupGrid.addComponentColumn { statusBadge(it.status) }.setHeader("Status").setWidth("130px")
+        groupGrid.addComponentColumn { group ->
+            Button("Archive") { dialog.close(); openArchiveGroupDialog(group) }.apply {
+                isEnabled = group.status == FeatureStatus.ACTIVE
+                addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
+            }
+        }.setHeader("Action").setWidth("120px")
         groupGrid.setItems(groups)
-        dialog.add(groupGrid)
+        groupGrid.height = "350px"
+        if (groups.isEmpty()) dialog.add(Paragraph("No groups yet. Create a group to organize your features."))
+        else dialog.add(groupGrid)
         dialog.footer.add(Button("Close") { dialog.close() })
+        dialog.footer.add(Button("New group") { dialog.close(); openCreateGroupDialog() }
+            .apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
         dialog.open()
+    }
+
+    private fun activeGroupChoices() = listOf(globalGroup) + groups.filter { it.status == FeatureStatus.ACTIVE }
+        .map { GroupChoice(it.key, "${it.displayName} (${it.key})") }
+
+    private fun groupPicker(label: String) = ComboBox<GroupChoice>(label).apply {
+        setItemLabelGenerator { it.label }
+        setItems(activeGroupChoices())
+        isRequired = true
+        value = globalGroup
+        helperText = "Global stores features outside a group"
     }
 
     private fun openMoveDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Move ${featureName(feature)}")
-        val target = ComboBox<FeatureGroupResponse>("Target group").apply {
-            setItems(groups.filter { it.status == FeatureStatus.ACTIVE })
-            setItemLabelGenerator { "${it.key} — ${it.displayName}" }
-            isClearButtonVisible = true
-            helperText = "Clear to move to Global"
-            value = groups.firstOrNull { it.key == feature.group }
+        refreshGroups()
+        val dialog = newDialog("Move feature")
+        val target = groupPicker("Target group").apply {
+            value = activeGroupChoices().firstOrNull { it.key == feature.group }
         }
-        dialog.add(target)
-        dialog.footer.add(Button("Cancel") { dialog.close() })
-        dialog.footer.add(Button("Move") {
+        val confirm = Button("Move feature") {
             runUiAction {
-                service.moveFeature(
-                    tenant.key,
-                    feature.key,
-                    feature.group,
-                    MoveFeatureRequest(version = feature.version, targetGroup = target.value?.key),
-                )
-                dialog.close()
+                val destination = target.value ?: return@runUiAction
+                val moved = service.moveFeature(tenant.key, feature.key, feature.group,
+                    MoveFeatureRequest(feature.version, destination.key))
+                currentPage = 0
+                if (groupSelect.value?.all == false) selectGroup(moved.group)
                 refreshFeatures()
+                dialog.close()
+                success("'${feature.key}' moved to ${destination.label}")
             }
-        }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
+        }.apply {
+            addThemeVariants(ButtonVariant.LUMO_PRIMARY)
+            isEnabled = false
+        }
+        target.addValueChangeListener { confirm.isEnabled = it.value != null && it.value.key != feature.group }
+        dialog.add(form(Span(feature.key).apply { addClassName("feature-key") },
+            Paragraph("Current group: ${feature.group ?: "Global"}"), target))
+        dialog.footer.add(Button("Cancel") { dialog.close() }, confirm)
         dialog.open()
+        target.focus()
     }
 
     private fun openArchiveGroupDialog(group: FeatureGroupResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Archive group ${group.key}?")
+        val dialog = newDialog("Archive group ${group.key}?")
         dialog.add(Paragraph("All active features in this group will be archived."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Archive group") {
@@ -404,6 +505,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                 dialog.close()
                 refreshGroups()
                 refreshFeatures()
+                success("Group archived")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR) })
         dialog.open()
@@ -411,8 +513,8 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openEditDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Edit ${featureName(feature)}")
-        val description = TextArea("Description").apply { value = feature.description }
+        val dialog = newDialog("Edit ${featureName(feature)}")
+        val description = TextArea("Description").apply { value = feature.description; maxLength = 2000 }
         val booleanValue = Checkbox("Enabled").apply {
             value = feature.value as? Boolean ?: false
             isVisible = feature.type == FeatureType.BOOLEAN
@@ -422,7 +524,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
             value = feature.value as? String
             isVisible = feature.type == FeatureType.ENUM
         }
-        dialog.add(VerticalLayout(description, booleanValue, enumValue))
+        dialog.add(form(description, booleanValue, enumValue))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Save") {
             runUiAction {
@@ -439,6 +541,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                 )
                 dialog.close()
                 refreshFeatures()
+                success("Changes saved")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
         dialog.open()
@@ -446,7 +549,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openArchiveDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("Archive ${featureName(feature)}?")
+        val dialog = newDialog("Archive ${featureName(feature)}?")
         dialog.add(Paragraph("Archived features disappear from the public API and can be shown by selecting ARCHIVED in the status filter."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Archive") {
@@ -454,6 +557,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                 service.archive(tenant.key, feature.key, feature.group, feature.version)
                 dialog.close()
                 refreshFeatures()
+                success("Changes saved")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR) })
         dialog.open()
@@ -461,7 +565,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
 
     private fun openHistoryDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = Dialog("History: ${featureName(feature)}")
+        val dialog = newDialog("History: ${featureName(feature)}")
         dialog.width = "850px"
         val history = Grid(service.history(tenant.key, feature.key, feature.group))
         history.addColumn { HISTORY_DATE_FORMATTER.format(it.changedAt) }.setHeader("Changed at").setAutoWidth(true)
@@ -479,11 +583,56 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
     private fun featureName(feature: AdminFeatureResponse) =
         feature.group?.let { "$it/${feature.key}" } ?: feature.key
 
+    private fun newDialog(title: String) = Dialog(title).apply {
+        width = "520px"
+        maxWidth = "calc(100vw - 32px)"
+        addClassName("feature-dialog")
+        isCloseOnOutsideClick = false
+    }
+
+    private fun form(vararg fields: Component) = VerticalLayout(*fields).apply {
+        isPadding = false
+        isSpacing = true
+        defaultHorizontalComponentAlignment = Alignment.STRETCH
+    }
+
+    private fun statusLabel(status: FeatureStatus) = if (status == FeatureStatus.ACTIVE) "Active" else "Archived"
+
+    private fun statusBadge(status: FeatureStatus) = Span(statusLabel(status)).apply {
+        addClassNames("status-badge", if (status == FeatureStatus.ACTIVE) "status-active" else "status-archived")
+    }
+
+    private fun <T : Any> validated(request: T, fields: Map<String, HasValidation> = emptyMap()): T {
+        fields.values.forEach { it.isInvalid = false }
+        val violations = validator.validate(request)
+        if (violations.isNotEmpty()) {
+            val details = violations.map { it.propertyPath.toString() to it.message }
+            details.forEach { (field, message) -> fields[field]?.let { it.isInvalid = true; it.errorMessage = message } }
+            throw DomainValidationException("Check the highlighted fields", details)
+        }
+        return request
+    }
+
+    private fun success(message: String) {
+        Notification.show(message, 3500, Notification.Position.BOTTOM_START)
+            .addThemeVariants(NotificationVariant.LUMO_SUCCESS)
+    }
+
     private fun runUiAction(action: () -> Unit) {
         try {
             action()
         } catch (exception: RuntimeException) {
-            Notification.show(exception.message ?: "Operation failed", 5000, Notification.Position.MIDDLE)
+            val message = when (exception) {
+                is DomainValidationException -> exception.violations.joinToString("; ") { "${it.first}: ${it.second}" }
+                is ConflictException, is NotFoundException -> exception.message ?: "Refresh the list and try again"
+                else -> {
+                    LoggerFactory.getLogger(MainView::class.java).error("Feature management action failed", exception)
+                    if (generateSequence<Throwable>(exception) { it.cause }.any { it is DataIntegrityViolationException }) {
+                        "This key may already exist. Check the group and archived items, then try again."
+                    } else "Could not complete the action. Refresh the page and try again."
+                }
+            }
+            Notification.show(message, 8000, Notification.Position.BOTTOM_START)
                 .addThemeVariants(NotificationVariant.LUMO_ERROR)
         }
     }

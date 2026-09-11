@@ -1,0 +1,91 @@
+html {
+    color-scheme: light;
+    --lumo-font-family: "Segoe UI", system-ui, sans-serif;
+    --lumo-font-size-m: 1rem;
+    --lumo-font-size-s: .875rem;
+    --lumo-primary-color: #2855d9;
+    --lumo-primary-text-color: #234bc1;
+    --lumo-primary-color-10pct: #2855d91a;
+    --lumo-primary-color-50pct: #2855d980;
+    --lumo-body-text-color: #1c2940;
+    --lumo-secondary-text-color: #5b687d;
+    --lumo-header-text-color: #16233b;
+    --lumo-border-radius-m: 8px;
+    --lumo-success-text-color: #14744d;
+}
+body { margin: 0; background: #f3f5fa; }
+.main-view { background: #f3f5fa; min-height: 100dvh; }
+.app-header {
+    width: 100%; box-sizing: border-box; display: flex; align-items: center;
+    justify-content: space-between; gap: 24px; padding: 14px 32px;
+    background: white; border-bottom: 1px solid #dce2ed; flex-shrink: 0;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 { margin: 0; font-size: 1.35rem; letter-spacing: -.035em; font-weight: 700; }
+.brand-mark {
+    display: grid; place-items: center; width: 36px; height: 36px;
+    color: white; background: #2855d9; border-radius: 10px; font-size: 1.3rem; font-weight: 750;
+}
+.tenant-controls { display: flex; align-items: baseline; gap: 16px; }
+.tenant-controls vaadin-combo-box { width: 260px; padding-top: 0; }
+.workspace { box-sizing: border-box; padding: 28px 32px 24px; gap: 20px; min-height: 0; }
+.page-toolbar { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.page-title h2 { margin: 0 0 6px; font-size: 1.85rem; letter-spacing: -.04em; }
+.result-summary { color: #5b687d; font-size: .875rem; }
+.page-actions, .selection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.filters {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 16px;
+    width: 100%; padding: 16px 20px; box-sizing: border-box;
+    border: 1px solid #dce2ed; background: white; border-radius: 12px;
+}
+.filters vaadin-text-field { flex: 2 1 260px; }
+.filters vaadin-combo-box, .filters vaadin-multi-select-combo-box { flex: 1 1 220px; min-width: 0; }
+.table-panel {
+    border: 1px solid #dce2ed; background: white; border-radius: 12px;
+    overflow: hidden; min-height: 320px; box-shadow: 0 2px 5px #1c294005;
+}
+.selection-bar {
+    display: flex; width: 100%; box-sizing: border-box; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 20px;
+    background: #fafbfe; border-bottom: 1px solid #e4e8f1;
+}
+.selection-summary { font-size: .875rem; color: #5b687d; overflow-wrap: anywhere; }
+.feature-grid { border: 0; min-height: 220px; }
+.feature-grid::part(header-cell) { background: #fafbfe; color: #5b687d; font-size: .875rem; }
+.feature-grid::part(body-cell) { padding-top: 12px; padding-bottom: 12px; }
+.feature-grid::part(selected-row-cell) { background: #edf2ff; }
+.feature-name { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.feature-key { font-family: "Cascadia Code", Consolas, monospace; font-size: .875rem; font-weight: 600; overflow-wrap: anywhere; }
+.feature-description { color: #5b687d; font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.value-chip { font-family: "Cascadia Code", Consolas, monospace; font-size: .875rem; }
+.status-badge { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: .875rem; font-weight: 600; }
+.status-active { color: #146444; background: #e6f5ed; }
+.status-archived { color: #606879; background: #edf0f5; }
+.pagination { padding: 12px 20px; box-sizing: border-box; border-top: 1px solid #e4e8f1; gap: 8px; }
+.pagination p { margin: 0 0 0 auto; font-size: .875rem; color: #5b687d; }
+.pagination:empty { display: none; }
+.empty-state { width: 100%; box-sizing: border-box; padding: 64px 24px; text-align: center; }
+.empty-state h2 { font-size: 1.25rem; margin: 0 0 8px; }
+.empty-state p { color: #5b687d; margin: 0; }
+.feature-dialog::part(header) { border-bottom: 1px solid #e4e8f1; padding-bottom: 16px; }
+.feature-dialog::part(footer) { border-top: 1px solid #e4e8f1; }
+.feature-dialog p { margin: 0; color: #5b687d; overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+    .app-header { padding: 16px 20px; flex-wrap: wrap; gap: 12px; }
+    .workspace { padding: 20px; }
+    .page-toolbar { align-items: flex-start; flex-direction: column; }
+    .selection-bar { padding: 12px; }
+}
+@media (max-width: 600px) {
+    .main-view { height: auto !important; }
+    .app-header { padding: 16px; }
+    .tenant-controls { width: 100%; gap: 8px; }
+    .tenant-controls vaadin-combo-box { flex: 1; min-width: 0; }
+    .workspace { padding: 20px 12px; height: auto !important; }
+    .filters { padding: 12px; gap: 8px; }
+    .filters vaadin-text-field, .filters vaadin-combo-box, .filters vaadin-multi-select-combo-box { flex-basis: 100%; }
+    .page-actions { gap: 6px; }
+    .table-panel { height: 560px !important; }
+    .pagination { padding: 12px; }
+    .pagination p { width: 100%; margin-left: 0; }
+}

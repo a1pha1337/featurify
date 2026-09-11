@@ -20,29 +20,11 @@ CREATE UNIQUE INDEX uq_tenant_default
 INSERT INTO tenant (key, display_name, active, created_at, updated_at, default_tenant)
 VALUES ('default', 'Default', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE);
 
-CREATE TABLE feature_group
-(
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id    UUID         NOT NULL REFERENCES tenant (id),
-    key          VARCHAR(255) NOT NULL,
-    display_name VARCHAR(255) NOT NULL,
-    status       VARCHAR(16)  NOT NULL DEFAULT 'ACTIVE',
-    version      BIGINT       NOT NULL DEFAULT 0,
-    created_at   TIMESTAMPTZ  NOT NULL,
-    updated_at   TIMESTAMPTZ  NOT NULL,
-    CONSTRAINT uq_feature_group_tenant_key UNIQUE (tenant_id, key),
-    CONSTRAINT uq_feature_group_id_tenant UNIQUE (id, tenant_id),
-    CONSTRAINT ck_feature_group_key CHECK (key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'),
-    CONSTRAINT ck_feature_group_status CHECK (status IN ('ACTIVE', 'ARCHIVED'))
-);
-
-CREATE INDEX ix_feature_group_tenant_status_key ON feature_group (tenant_id, status, key);
-
 CREATE TABLE feature
 (
     id            UUID PRIMARY KEY       DEFAULT gen_random_uuid(),
     tenant_id     UUID          NOT NULL REFERENCES tenant (id),
-    group_id      UUID,
+    group_key     VARCHAR(255),
     key           VARCHAR(255)  NOT NULL,
     type          VARCHAR(16)   NOT NULL,
     boolean_value BOOLEAN,
@@ -52,8 +34,9 @@ CREATE TABLE feature
     version       BIGINT        NOT NULL DEFAULT 0,
     created_at    TIMESTAMPTZ   NOT NULL,
     updated_at    TIMESTAMPTZ   NOT NULL,
-    CONSTRAINT fk_feature_group_tenant FOREIGN KEY (group_id, tenant_id)
-        REFERENCES feature_group (id, tenant_id),
+    CONSTRAINT ck_feature_group_key CHECK (
+        group_key IS NULL OR group_key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
+        ),
     CONSTRAINT ck_feature_key CHECK (key ~ '^[a-z0-9.-]+$'),
     CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM')),
     CONSTRAINT ck_feature_status CHECK (status IN ('ACTIVE', 'ARCHIVED')),
@@ -65,14 +48,14 @@ CREATE TABLE feature
 );
 
 CREATE UNIQUE INDEX uq_feature_tenant_group_key
-    ON feature (tenant_id, group_id, key)
-    WHERE group_id IS NOT NULL;
+    ON feature (tenant_id, group_key, key)
+    WHERE group_key IS NOT NULL;
 
 CREATE UNIQUE INDEX uq_feature_tenant_global_key
     ON feature (tenant_id, key)
-    WHERE group_id IS NULL;
+    WHERE group_key IS NULL;
 
-CREATE INDEX ix_feature_tenant_status_key ON feature (tenant_id, status, group_id, key);
+CREATE INDEX ix_feature_tenant_status_key ON feature (tenant_id, status, group_key, key);
 
 CREATE INDEX ix_feature_key_trgm
     ON feature USING GIN (key gin_trgm_ops);
