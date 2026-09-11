@@ -13,14 +13,17 @@ import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
+import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
+import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureStatus
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.Tenant
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
 import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
+import ru.a1pha1337.featurify.repository.FeatureGroupRepository
 import ru.a1pha1337.featurify.repository.FeatureRepository
 import ru.a1pha1337.featurify.repository.TenantRepository
 import ru.a1pha1337.featurify.security.ActorProvider
@@ -28,10 +31,12 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.Optional
 
 class FeatureToggleServiceTests {
     private val tenantRepository = mock(TenantRepository::class.java)
     private val featureRepository = mock(FeatureRepository::class.java)
+    private val groupRepository = mock(FeatureGroupRepository::class.java)
     private val optionRepository = mock(FeatureEnumOptionRepository::class.java)
     private val auditRepository = mock(FeatureAuditLogRepository::class.java)
     private val actorProvider = mock(ActorProvider::class.java)
@@ -45,6 +50,7 @@ class FeatureToggleServiceTests {
         service = FeatureToggleService(
             tenantRepository,
             featureRepository,
+            groupRepository,
             optionRepository,
             auditRepository,
             actorProvider,
@@ -76,7 +82,7 @@ class FeatureToggleServiceTests {
     @Test
     fun `stale version is rejected before update`() {
         val feature = booleanFeature(version = 5)
-        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
 
         assertThrows(ConflictException::class.java) {
             service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 4, booleanValue = true))
@@ -88,7 +94,7 @@ class FeatureToggleServiceTests {
     @Test
     fun `archived feature is hidden from public read`() {
         val feature = booleanFeature(version = 2).copy(status = FeatureStatus.ARCHIVED)
-        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
 
         assertThrows(NotFoundException::class.java) {
             service.getActive("blue", feature.key, null)
@@ -97,28 +103,77 @@ class FeatureToggleServiceTests {
 
     @Test
     fun `grouped feature lookup uses tenant group and key`() {
-        val feature = booleanFeature(version = 2).copy(groupKey = "checkout")
+        val groupId = UUID.randomUUID()
+        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val feature = booleanFeature(version = 2).copy(groupId = groupId)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
+        `when`(groupRepository.findById(groupId)).thenReturn(Optional.of(group))
         `when`(
-            featureRepository.findByTenantIdAndGroupKeyAndKey(tenantId, "checkout", feature.key),
+            featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key),
         ).thenReturn(feature)
 
         val result = service.getActive("blue", feature.key, "checkout")
 
         assertEquals("checkout", result.group)
         assertEquals(feature.key, result.key)
-        verify(featureRepository).findByTenantIdAndGroupKeyAndKey(tenantId, "checkout", feature.key)
-        verify(featureRepository, never()).findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)
+        verify(featureRepository).findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key)
+        verify(featureRepository, never()).findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)
     }
 
     @Test
     fun `feature without group uses global lookup`() {
         val feature = booleanFeature(version = 2)
-        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
 
         val result = service.getActive("blue", feature.key, null)
 
         assertEquals(null, result.group)
-        verify(featureRepository).findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)
+        verify(featureRepository).findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)
+    }
+
+    @Test
+    fun `archiving group archives all active features in that group`() {
+        val groupId = UUID.randomUUID()
+        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", version = 3, createdAt = now, updatedAt = now)
+        val first = booleanFeature(version = 1).copy(groupId = groupId)
+        val second = booleanFeature(version = 2).copy(id = UUID.randomUUID(), key = "checkout.payment", groupId = groupId)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, group.key)).thenReturn(group)
+        `when`(groupRepository.save(org.mockito.ArgumentMatchers.any(FeatureGroup::class.java)))
+            .thenAnswer { invocation -> invocation.getArgument(0) }
+        `when`(featureRepository.findAllByTenantIdAndGroupIdAndStatus(tenantId, groupId, FeatureStatus.ACTIVE))
+            .thenReturn(listOf(first, second))
+        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
+            .thenAnswer { invocation -> invocation.getArgument(0) }
+        `when`(groupRepository.findById(groupId)).thenReturn(Optional.of(group))
+
+        service.archiveGroup("blue", group.key, group.version)
+
+        val featureCaptor = ArgumentCaptor.forClass(Feature::class.java)
+        verify(featureRepository, org.mockito.Mockito.times(2)).save(featureCaptor.capture())
+        assertEquals(setOf(FeatureStatus.ARCHIVED), featureCaptor.allValues.map { it.status }.toSet())
+        verify(auditRepository, org.mockito.Mockito.times(2)).save(org.mockito.ArgumentMatchers.any())
+    }
+
+    @Test
+    fun `moving feature updates its group`() {
+        val sourceId = UUID.randomUUID()
+        val targetId = UUID.randomUUID()
+        val source = FeatureGroup(sourceId, tenantId, "old", "Old", createdAt = now, updatedAt = now)
+        val target = FeatureGroup(targetId, tenantId, "new", "New", createdAt = now, updatedAt = now)
+        val feature = booleanFeature(version = 2).copy(groupId = sourceId)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, "old")).thenReturn(source)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, "new")).thenReturn(target)
+        `when`(featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, sourceId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
+            .thenAnswer { invocation -> invocation.getArgument(0) }
+        `when`(groupRepository.findById(targetId)).thenReturn(Optional.of(target))
+
+        val result = service.moveFeature("blue", feature.key, "old", MoveFeatureRequest(2, "new"))
+
+        assertEquals("new", result.group)
+        val captor = ArgumentCaptor.forClass(Feature::class.java)
+        verify(featureRepository).save(captor.capture())
+        assertEquals(targetId, captor.value.groupId)
     }
 
     @Test
@@ -232,7 +287,7 @@ class FeatureToggleServiceTests {
             createdAt = now,
             updatedAt = now,
         )
-        `when`(featureRepository.findByTenantIdAndGroupKeyIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
         `when`(optionRepository.findAllByFeatureIdOrderBySortOrder(featureId)).thenReturn(
             listOf(FeatureEnumOption(UUID.randomUUID(), featureId, "CAT", 0)),
         )

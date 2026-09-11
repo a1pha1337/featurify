@@ -23,8 +23,11 @@ import jakarta.annotation.security.PermitAll
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
+import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateTenantRequest
+import ru.a1pha1337.featurify.dto.FeatureGroupResponse
+import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.TenantResponse
 import ru.a1pha1337.featurify.domain.FeatureStatus
@@ -40,13 +43,19 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
     private val tenantSelect = ComboBox<TenantResponse>("Tenant")
     private val grid = Grid<AdminFeatureResponse>()
     private val createFeatureButton = Button("New feature")
+    private val createGroupButton = Button("New group")
     private val editButton = Button("Edit")
+    private val moveButton = Button("Move")
     private val archiveButton = Button("Archive")
+    private val archiveGroupButton = Button("Archive group")
+    private val groupsButton = Button("Groups")
     private val historyButton = Button("History")
+    private val groupSelect = ComboBox<FeatureGroupResponse>("Group")
     private val statusFilter = MultiSelectComboBox<FeatureStatus>("Statuses")
     private val keyFilter = TextField("Feature key")
     private val pagination = HorizontalLayout()
     private var currentPage = 0
+    private var groups: List<FeatureGroupResponse> = emptyList()
 
     companion object {
         private const val PAGE_SIZE = 20
@@ -82,17 +91,30 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         }
         tenantSelect.addValueChangeListener {
             currentPage = 0
+            refreshGroups()
             refreshFeatures()
         }
         val createTenantButton = Button("New tenant") { openTenantDialog() }
         createFeatureButton.addClickListener { openCreateFeatureDialog() }
+        createGroupButton.addClickListener { openCreateGroupDialog() }
+        groupsButton.addClickListener { openGroupsDialog() }
         createFeatureButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY)
+        groupSelect.setItemLabelGenerator { "${it.key} — ${it.displayName}" }
+        groupSelect.isClearButtonVisible = true
+        groupSelect.width = "240px"
+        groupSelect.addValueChangeListener { event ->
+            archiveGroupButton.isEnabled = event.value?.status == FeatureStatus.ACTIVE
+        }
 
         editButton.isEnabled = false
+        moveButton.isEnabled = false
         archiveButton.isEnabled = false
+        archiveGroupButton.isEnabled = false
         historyButton.isEnabled = false
         editButton.addClickListener { selected()?.let(::openEditDialog) }
+        moveButton.addClickListener { selected()?.let(::openMoveDialog) }
         archiveButton.addClickListener { selected()?.let(::openArchiveDialog) }
+        archiveGroupButton.addClickListener { groupSelect.value?.let(::openArchiveGroupDialog) }
         historyButton.addClickListener { selected()?.let(::openHistoryDialog) }
         statusFilter.addValueChangeListener {
             currentPage = 0
@@ -109,6 +131,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         grid.asSingleSelect().addValueChangeListener { event ->
             val selected = event.value
             editButton.isEnabled = selected?.status == FeatureStatus.ACTIVE
+            moveButton.isEnabled = selected?.status == FeatureStatus.ACTIVE
             archiveButton.isEnabled = selected?.status == FeatureStatus.ACTIVE
             historyButton.isEnabled = selected != null
         }
@@ -120,8 +143,15 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                 tenantSelect,
                 createTenantButton,
                 createFeatureButton,
+                createGroupButton,
+                groupsButton,
+            ),
+            HorizontalLayout(
+                groupSelect,
                 editButton,
+                moveButton,
                 archiveButton,
+                archiveGroupButton,
                 historyButton,
             ),
             HorizontalLayout(statusFilter, keyFilter),
@@ -139,7 +169,19 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
             ?: tenants.firstOrNull { it.defaultTenant }
             ?: tenants.firstOrNull()
         createFeatureButton.isEnabled = tenantSelect.value != null
+        createGroupButton.isEnabled = tenantSelect.value != null
+        groupsButton.isEnabled = tenantSelect.value != null
+        refreshGroups()
         refreshFeatures()
+    }
+
+    private fun refreshGroups() {
+        groups = tenantSelect.value?.let { service.listGroups(it.key) } ?: emptyList()
+        groupSelect.setItems(groups.filter { it.status == FeatureStatus.ACTIVE })
+        if (groupSelect.value?.let { value -> groups.none { it.id == value.id && it.status == FeatureStatus.ACTIVE } } == true) {
+            groupSelect.clear()
+        }
+        archiveGroupButton.isEnabled = groupSelect.value?.status == FeatureStatus.ACTIVE
     }
 
     private fun refreshFeatures() {
@@ -148,6 +190,10 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
             grid.setItems(emptyList())
             renderPagination(0, 0)
             createFeatureButton.isEnabled = false
+            createGroupButton.isEnabled = false
+            groupsButton.isEnabled = false
+            groupSelect.clear()
+            archiveGroupButton.isEnabled = false
             return
         }
 
@@ -173,7 +219,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         createFeatureButton.isEnabled = true
     }
 
-    private fun pageRequest() = PageRequest.of(currentPage, PAGE_SIZE, Sort.by("groupKey", "key").ascending())
+    private fun pageRequest() = PageRequest.of(currentPage, PAGE_SIZE, Sort.by("groupId", "key").ascending())
 
     private fun renderPagination(totalPages: Int, totalElements: Long, emptyMessage: String = "No features") {
         pagination.removeAll()
@@ -237,10 +283,11 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
         val tenant = tenantSelect.value ?: return
         val dialog = Dialog("Create feature")
         val key = TextField("Key")
-        val group = TextField("Group").apply {
-            placeholder = "Global"
-            helperText = "Optional; leave empty for a tenant-wide feature"
-            maxLength = 255
+        val group = ComboBox<FeatureGroupResponse>("Group").apply {
+            setItems(groups.filter { it.status == FeatureStatus.ACTIVE })
+            setItemLabelGenerator { "${it.key} — ${it.displayName}" }
+            isClearButtonVisible = true
+            helperText = "Optional; empty means Global"
         }
         val type = ComboBox<FeatureType>("Type").apply {
             setItems(*FeatureType.entries.toTypedArray())
@@ -269,7 +316,7 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                     CreateFeatureRequest(
                         key = key.value,
                         type = selectedType,
-                        group = group.value.trim().takeIf { it.isNotEmpty() },
+                        group = group.value?.key,
                         description = description.value,
                         booleanValue = booleanValue.value.takeIf { selectedType == FeatureType.BOOLEAN },
                         enumValue = enumValue.value.takeIf { selectedType == FeatureType.ENUM },
@@ -280,6 +327,85 @@ class MainView(private val service: FeatureToggleService) : VerticalLayout() {
                 refreshFeatures()
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
+        dialog.open()
+    }
+
+    private fun openCreateGroupDialog() {
+        val tenant = tenantSelect.value ?: return
+        val dialog = Dialog("Create feature group")
+        val key = TextField("Group key").apply { isRequired = true; maxLength = 255 }
+        val displayName = TextField("Display name").apply { isRequired = true; maxLength = 255 }
+        dialog.add(VerticalLayout(key, displayName))
+        dialog.footer.add(Button("Cancel") { dialog.close() })
+        dialog.footer.add(Button("Create") {
+            runUiAction {
+                service.createGroup(
+                    tenant.key,
+                    CreateFeatureGroupRequest(key = key.value, displayName = displayName.value),
+                )
+                dialog.close()
+                refreshGroups()
+            }
+        }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
+        dialog.open()
+    }
+
+    private fun openGroupsDialog() {
+        if (tenantSelect.value == null) return
+        refreshGroups()
+        val dialog = Dialog("Feature groups")
+        dialog.width = "700px"
+        val groupGrid = Grid<FeatureGroupResponse>()
+        groupGrid.addColumn { it.key }.setHeader("Key").setAutoWidth(true)
+        groupGrid.addColumn { it.displayName }.setHeader("Name").setFlexGrow(1)
+        groupGrid.addColumn { it.status }.setHeader("Status").setAutoWidth(true)
+        groupGrid.addColumn { it.version }.setHeader("Version").setAutoWidth(true)
+        groupGrid.setItems(groups)
+        dialog.add(groupGrid)
+        dialog.footer.add(Button("Close") { dialog.close() })
+        dialog.open()
+    }
+
+    private fun openMoveDialog(feature: AdminFeatureResponse) {
+        val tenant = tenantSelect.value ?: return
+        val dialog = Dialog("Move ${featureName(feature)}")
+        val target = ComboBox<FeatureGroupResponse>("Target group").apply {
+            setItems(groups.filter { it.status == FeatureStatus.ACTIVE })
+            setItemLabelGenerator { "${it.key} — ${it.displayName}" }
+            isClearButtonVisible = true
+            helperText = "Clear to move to Global"
+            value = groups.firstOrNull { it.key == feature.group }
+        }
+        dialog.add(target)
+        dialog.footer.add(Button("Cancel") { dialog.close() })
+        dialog.footer.add(Button("Move") {
+            runUiAction {
+                service.moveFeature(
+                    tenant.key,
+                    feature.key,
+                    feature.group,
+                    MoveFeatureRequest(version = feature.version, targetGroup = target.value?.key),
+                )
+                dialog.close()
+                refreshFeatures()
+            }
+        }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
+        dialog.open()
+    }
+
+    private fun openArchiveGroupDialog(group: FeatureGroupResponse) {
+        val tenant = tenantSelect.value ?: return
+        val dialog = Dialog("Archive group ${group.key}?")
+        dialog.add(Paragraph("All active features in this group will be archived."))
+        dialog.footer.add(Button("Cancel") { dialog.close() })
+        dialog.footer.add(Button("Archive group") {
+            runUiAction {
+                service.archiveGroup(tenant.key, group.key, group.version)
+                dialog.close()
+                refreshGroups()
+                refreshFeatures()
+            }
+        }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR) })
         dialog.open()
     }
 

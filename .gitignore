@@ -9,6 +9,7 @@ types.d.ts
 tsconfig.json
 HELP.md
 .gradle
+.gradle-home/
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/

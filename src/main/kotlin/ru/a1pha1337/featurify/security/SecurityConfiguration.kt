@@ -22,6 +22,7 @@ class SecurityConfiguration(private val objectMapper: ObjectMapper) {
                 .requestMatchers(HttpMethod.GET, "/api/v1/features:resolve").permitAll()
                 .requestMatchers("/actuator/health/**").permitAll()
                 .requestMatchers("/api/v1/tenants/**").authenticated()
+                .requestMatchers("/api/v1/groups/**").authenticated()
                 .requestMatchers("/api/v1/features/**", "/api/v1/features").authenticated()
         }
         http.csrf { csrf -> csrf.ignoringRequestMatchers("/api/**") }

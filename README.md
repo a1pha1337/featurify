@@ -78,8 +78,12 @@ Admin endpoints принимают Keycloak Bearer token либо browser OAuth2
 ```text
 POST  /api/v1/tenants
 GET   /api/v1/tenants
+POST  /api/v1/groups?tenant={tenantKey}
+GET   /api/v1/groups?tenant={tenantKey}
+POST  /api/v1/groups/{groupKey}/archive?tenant={tenantKey}
 POST  /api/v1/features?tenant={tenantKey}
 PATCH /api/v1/features/{key}?tenant={tenantKey}&group={groupKey}
+PATCH /api/v1/features/{key}/group?tenant={tenantKey}&group={currentGroupKey}
 POST  /api/v1/features/{key}/archive?tenant={tenantKey}&group={groupKey}
 GET   /api/v1/features/{key}/history?tenant={tenantKey}&group={groupKey}
 ```
@@ -108,6 +112,11 @@ GET   /api/v1/features/{key}/history?tenant={tenantKey}&group={groupKey}
 ```json
 {"version":1}
 ```
+
+Группу можно создать телом `{"key":"checkout","displayName":"Checkout"}`. Перенос фичи
+выполняется телом `{"version":0,"targetGroup":"checkout"}`; `targetGroup: null` переносит
+фичу в глобальную область tenant. При архивировании группы она и все её активные фичи
+архивируются одной транзакцией и попадают в аудит.
 
 Все REST-ошибки имеют единый вид:
 
