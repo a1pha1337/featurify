@@ -8,19 +8,48 @@ import java.util.UUID
 
 interface FeatureRepository : CrudRepository<Feature, UUID> {
     fun findAllByNamespaceIdAndGroupId(
-        namespaceId: UUID, groupId: UUID, pageable: Pageable,
+        namespaceId: UUID,
+        groupId: UUID,
+        pageable: Pageable,
     ): Page<Feature>
+
     fun findAllByNamespaceIdAndGroupIdAndKeyContaining(
-        namespaceId: UUID, groupId: UUID, key: String, pageable: Pageable,
+        namespaceId: UUID,
+        groupId: UUID,
+        key: String,
+        pageable: Pageable,
     ): Page<Feature>
+
     fun findAllByNamespaceIdAndGroupIdIsNull(
-        namespaceId: UUID, pageable: Pageable,
+        namespaceId: UUID,
+        pageable: Pageable,
     ): Page<Feature>
+
     fun findAllByNamespaceIdAndGroupIdIsNullAndKeyContaining(
-        namespaceId: UUID, key: String, pageable: Pageable,
+        namespaceId: UUID,
+        key: String,
+        pageable: Pageable,
     ): Page<Feature>
-    fun findByNamespaceIdAndGroupIdAndKey(namespaceId: UUID, groupId: UUID, key: String): Feature?
-    fun findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId: UUID, key: String): Feature?
-    fun findAllByNamespaceId(namespaceId: UUID, pageable: Pageable): Page<Feature>
-    fun findAllByNamespaceIdAndKeyContaining(namespaceId: UUID, key: String, pageable: Pageable): Page<Feature>
+
+    fun findByNamespaceIdAndGroupIdAndKey(
+        namespaceId: UUID,
+        groupId: UUID,
+        key: String,
+    ): Feature?
+
+    fun findByNamespaceIdAndGroupIdIsNullAndKey(
+        namespaceId: UUID,
+        key: String,
+    ): Feature?
+
+    fun findAllByNamespaceId(
+        namespaceId: UUID,
+        pageable: Pageable,
+    ): Page<Feature>
+
+    fun findAllByNamespaceIdAndKeyContaining(
+        namespaceId: UUID,
+        key: String,
+        pageable: Pageable,
+    ): Page<Feature>
 }

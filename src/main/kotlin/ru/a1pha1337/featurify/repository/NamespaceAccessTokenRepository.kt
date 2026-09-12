@@ -6,5 +6,9 @@ import java.util.UUID
 
 interface NamespaceAccessTokenRepository : CrudRepository<NamespaceAccessToken, UUID> {
     fun findAllByNamespaceIdOrderByCreatedAtDesc(namespaceId: UUID): List<NamespaceAccessToken>
-    fun findByIdAndNamespaceId(id: UUID, namespaceId: UUID): NamespaceAccessToken?
+
+    fun findByIdAndNamespaceId(
+        id: UUID,
+        namespaceId: UUID,
+    ): NamespaceAccessToken?
 }

@@ -21,5 +21,9 @@ data class CreateFeatureRequest(
     @field:Size(max = 255)
     val enumValue: String? = null,
     @field:Size(max = 100)
-    val enumOptions: List<@NotBlank @Size(max = 255) String> = emptyList(),
+    val enumOptions: List<
+        @NotBlank
+        @Size(max = 255)
+        String,
+    > = emptyList(),
 )

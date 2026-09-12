@@ -9,14 +9,42 @@ import io.grpc.protobuf.StatusProto
 
 /** Standard gRPC rich errors; clients use code/reason rather than parsing descriptions. */
 object GrpcErrors {
-    fun exception(status: Status, reason: String, message: String,
-                  violations: List<Pair<String, String>> = emptyList()): StatusRuntimeException {
-        val details = com.google.rpc.Status.newBuilder().setCode(status.code.value()).setMessage(message)
-            .addDetails(Any.pack(ErrorInfo.newBuilder().setDomain("featurify").setReason(reason).build()))
+    fun exception(
+        status: Status,
+        reason: String,
+        message: String,
+        violations: List<Pair<String, String>> = emptyList(),
+    ): StatusRuntimeException {
+        val details =
+            com.google.rpc.Status
+                .newBuilder()
+                .setCode(status.code.value())
+                .setMessage(message)
+                .addDetails(
+                    Any.pack(
+                        ErrorInfo
+                            .newBuilder()
+                            .setDomain("featurify")
+                            .setReason(reason)
+                            .build(),
+                    ),
+                )
         if (violations.isNotEmpty()) {
-            details.addDetails(Any.pack(BadRequest.newBuilder().addAllFieldViolations(violations.map {
-                BadRequest.FieldViolation.newBuilder().setField(it.first).setDescription(it.second).build()
-            }).build()))
+            details.addDetails(
+                Any.pack(
+                    BadRequest
+                        .newBuilder()
+                        .addAllFieldViolations(
+                            violations.map {
+                                BadRequest.FieldViolation
+                                    .newBuilder()
+                                    .setField(it.first)
+                                    .setDescription(it.second)
+                                    .build()
+                            },
+                        ).build(),
+                ),
+            )
         }
         return StatusProto.toStatusRuntimeException(details.build())
     }

@@ -17,15 +17,24 @@ import ru.a1pha1337.featurify.service.AccessTokenService
 import tools.jackson.databind.ObjectMapper
 
 @Configuration
-class SecurityConfiguration(private val objectMapper: ObjectMapper) {
+class SecurityConfiguration(
+    private val objectMapper: ObjectMapper,
+) {
     @Bean
     @Order(1)
-    fun featureReadSecurityFilterChain(http: HttpSecurity, tokens: AccessTokenService): SecurityFilterChain {
+    fun featureReadSecurityFilterChain(
+        http: HttpSecurity,
+        tokens: AccessTokenService,
+    ): SecurityFilterChain {
         val paths = listOf("/api/v1/features", "/api/v1/features/{key}", "/api/v1/features:resolve")
         val matcher = PathPatternRequestMatcher.withDefaults()
-        http.securityMatcher(OrRequestMatcher(listOf(HttpMethod.GET, HttpMethod.HEAD).flatMap { method ->
-            paths.map { matcher.matcher(method, it) }
-        }))
+        http.securityMatcher(
+            OrRequestMatcher(
+                listOf(HttpMethod.GET, HttpMethod.HEAD).flatMap { method ->
+                    paths.map { matcher.matcher(method, it) }
+                },
+            ),
+        )
         http.sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
         http.requestCache { it.disable() }
         http.csrf { it.disable() }
@@ -34,11 +43,24 @@ class SecurityConfiguration(private val objectMapper: ObjectMapper) {
         http.exceptionHandling { exceptions ->
             exceptions.authenticationEntryPoint { request, response, _ ->
                 response.setHeader("WWW-Authenticate", "Bearer realm=\"featurify\"")
-                ApiProblems.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
-                    "UNAUTHORIZED", "A valid namespace access token is required")
+                ApiProblems.write(
+                    objectMapper,
+                    request,
+                    response,
+                    HttpStatus.UNAUTHORIZED,
+                    "UNAUTHORIZED",
+                    "A valid namespace access token is required",
+                )
             }
             exceptions.accessDeniedHandler { request, response, _ ->
-                ApiProblems.write(objectMapper, request, response, HttpStatus.FORBIDDEN, "FORBIDDEN", "Access is denied")
+                ApiProblems.write(
+                    objectMapper,
+                    request,
+                    response,
+                    HttpStatus.FORBIDDEN,
+                    "FORBIDDEN",
+                    "Access is denied",
+                )
             }
         }
         return http.build()
@@ -48,34 +70,63 @@ class SecurityConfiguration(private val objectMapper: ObjectMapper) {
     @Order(2)
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http.authorizeHttpRequests { requests ->
-            requests.requestMatchers("/actuator/health/**").permitAll()
-                .requestMatchers("/api/**").authenticated()
+            requests
+                .requestMatchers("/actuator/health/**")
+                .permitAll()
+                .requestMatchers("/api/**")
+                .authenticated()
         }
         http.csrf { it.ignoringRequestMatchers("/api/**") }
         http.oauth2ResourceServer { resourceServer ->
             resourceServer.jwt { }
             resourceServer.authenticationEntryPoint { request, response, _ ->
                 response.setHeader("WWW-Authenticate", "Bearer realm=\"keycloak\"")
-                ApiProblems.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
-                    "UNAUTHORIZED", "A valid Keycloak authentication is required")
+                ApiProblems.write(
+                    objectMapper,
+                    request,
+                    response,
+                    HttpStatus.UNAUTHORIZED,
+                    "UNAUTHORIZED",
+                    "A valid Keycloak authentication is required",
+                )
             }
             resourceServer.accessDeniedHandler { request, response, _ ->
-                ApiProblems.write(objectMapper, request, response, HttpStatus.FORBIDDEN, "FORBIDDEN", "Access is denied")
+                ApiProblems.write(
+                    objectMapper,
+                    request,
+                    response,
+                    HttpStatus.FORBIDDEN,
+                    "FORBIDDEN",
+                    "Access is denied",
+                )
             }
         }
         http.exceptionHandling { exceptions ->
             exceptions.authenticationEntryPoint { request, response, _ ->
                 if (request.requestURI.startsWith("/api/")) {
                     response.setHeader("WWW-Authenticate", "Bearer realm=\"keycloak\"")
-                    ApiProblems.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
-                        "UNAUTHORIZED", "A valid Keycloak authentication is required")
+                    ApiProblems.write(
+                        objectMapper,
+                        request,
+                        response,
+                        HttpStatus.UNAUTHORIZED,
+                        "UNAUTHORIZED",
+                        "A valid Keycloak authentication is required",
+                    )
                 } else {
                     response.sendRedirect("/oauth2/authorization/keycloak")
                 }
             }
             exceptions.accessDeniedHandler { request, response, _ ->
                 if (request.requestURI.startsWith("/api/")) {
-                    ApiProblems.write(objectMapper, request, response, HttpStatus.FORBIDDEN, "FORBIDDEN", "Access is denied")
+                    ApiProblems.write(
+                        objectMapper,
+                        request,
+                        response,
+                        HttpStatus.FORBIDDEN,
+                        "FORBIDDEN",
+                        "Access is denied",
+                    )
                 } else {
                     response.sendError(HttpStatus.FORBIDDEN.value())
                 }

@@ -1,23 +1,46 @@
 package ru.a1pha1337.featurify.grpc
 
-import io.grpc.*
-import io.grpc.inprocess.InProcessChannelBuilder
-import io.grpc.inprocess.InProcessServerBuilder
-import io.grpc.stub.MetadataUtils
-import io.grpc.protobuf.StatusProto
 import com.google.rpc.BadRequest
 import com.google.rpc.ErrorInfo
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.BeforeEach
+import io.grpc.ManagedChannel
+import io.grpc.Metadata
+import io.grpc.Server
+import io.grpc.ServerInterceptors
+import io.grpc.Status
+import io.grpc.StatusRuntimeException
+import io.grpc.inprocess.InProcessChannelBuilder
+import io.grpc.inprocess.InProcessServerBuilder
+import io.grpc.protobuf.StatusProto
+import io.grpc.stub.MetadataUtils
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.*
-import org.mockito.ArgumentMatchers.*
-import org.mockito.Mockito.*
-import ru.a1pha1337.featurify.domain.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.doAnswer
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.verifyNoInteractions
+import org.mockito.Mockito.`when`
+import ru.a1pha1337.featurify.domain.Feature
+import ru.a1pha1337.featurify.domain.FeatureGroup
+import ru.a1pha1337.featurify.domain.FeatureType
+import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.domain.NamespaceAccessToken
 import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
-import ru.a1pha1337.featurify.grpc.proto.*
-import ru.a1pha1337.featurify.repository.*
-import ru.a1pha1337.featurify.service.*
+import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
+import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
+import ru.a1pha1337.featurify.repository.FeatureGroupRepository
+import ru.a1pha1337.featurify.repository.FeatureRepository
+import ru.a1pha1337.featurify.repository.NamespaceAccessTokenRepository
+import ru.a1pha1337.featurify.repository.NamespaceRepository
+import ru.a1pha1337.featurify.service.AccessTokenService
+import ru.a1pha1337.featurify.service.BackendFeatureService
+import ru.a1pha1337.featurify.service.NotFoundException
 import java.time.Clock
 import java.time.Instant
 import java.util.Optional
@@ -33,7 +56,8 @@ class FeatureGrpcTests {
     private val tokenRows = mutableMapOf<UUID, NamespaceAccessToken>()
     private val blue = Namespace(UUID.randomUUID(), "blue", "Blue", true, now, now)
     private val red = blue.copy(id = UUID.randomUUID(), key = "red")
-    private val blueGroup = FeatureGroup(UUID.randomUUID(), blue.id!!, "checkout", "Checkout", createdAt = now, updatedAt = now)
+    private val blueGroup =
+        FeatureGroup(UUID.randomUUID(), blue.id!!, "checkout", "Checkout", createdAt = now, updatedAt = now)
     private val redGroup = blueGroup.copy(id = UUID.randomUUID(), namespaceId = red.id!!)
     private lateinit var tokenService: AccessTokenService
     private lateinit var channel: ManagedChannel
@@ -57,20 +81,46 @@ class FeatureGrpcTests {
         }
         `when`(groups.findByNamespaceIdAndKey(blue.id!!, "checkout")).thenReturn(blueGroup)
         `when`(groups.findByNamespaceIdAndKey(red.id!!, "checkout")).thenReturn(redGroup)
-        val flag = Feature(UUID.randomUUID(), blue.id!!, "enabled", FeatureType.BOOLEAN,
-            groupId = blueGroup.id, booleanValue = false, version = 7, createdAt = now, updatedAt = now)
+        val flag =
+            Feature(
+                UUID.randomUUID(),
+                blue.id!!,
+                "enabled",
+                FeatureType.BOOLEAN,
+                groupId = blueGroup.id,
+                booleanValue = false,
+                version = 7,
+                createdAt = now,
+                updatedAt = now,
+            )
         `when`(features.findByNamespaceIdAndGroupIdAndKey(blue.id!!, blueGroup.id!!, "enabled")).thenReturn(flag)
         `when`(features.findByNamespaceIdAndGroupIdAndKey(red.id!!, redGroup.id!!, "enabled"))
             .thenReturn(flag.copy(namespaceId = red.id!!, groupId = redGroup.id, booleanValue = true))
         `when`(features.findByNamespaceIdAndGroupIdIsNullAndKey(blue.id!!, "color"))
-            .thenReturn(flag.copy(key = "color", groupId = null, type = FeatureType.ENUM, booleanValue = null, enumValue = "GREEN"))
+            .thenReturn(
+                flag.copy(
+                    key = "color",
+                    groupId = null,
+                    type = FeatureType.ENUM,
+                    booleanValue = null,
+                    enumValue = "GREEN",
+                ),
+            )
         tokenService = AccessTokenService(tokenRepository, namespaces, Clock.systemUTC())
         blueToken = tokenService.create("blue", CreateAccessTokenRequest("backend")).token
         redToken = tokenService.create("red", CreateAccessTokenRequest("backend")).token
         val name = InProcessServerBuilder.generateName()
-        server = InProcessServerBuilder.forName(name).directExecutor().addService(ServerInterceptors.intercept(
-            FeatureGrpcService(BackendFeatureService(features, groups)), TokenAuthenticationInterceptor(tokenService),
-        )).build().start()
+        server =
+            InProcessServerBuilder
+                .forName(name)
+                .directExecutor()
+                .addService(
+                    ServerInterceptors.intercept(
+                        FeatureGrpcService(BackendFeatureService(features, groups)),
+                        TokenAuthenticationInterceptor(tokenService),
+                    ),
+                ).build()
+                .start()
         channel = InProcessChannelBuilder.forName(name).directExecutor().build()
     }
 
@@ -80,16 +130,30 @@ class FeatureGrpcTests {
         server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
     }
 
-    private fun request(group: String = "checkout", key: String = "enabled") =
-        GetFeatureRequest.newBuilder().setGroup(group).setKey(key).build()
+    private fun request(
+        group: String = "checkout",
+        key: String = "enabled",
+    ) = GetFeatureRequest
+        .newBuilder()
+        .setGroup(group)
+        .setKey(key)
+        .build()
 
-    private fun stub(token: String? = blueToken, additionalHeaders: Metadata = Metadata()): FeatureServiceGrpc.FeatureServiceBlockingStub {
+    private fun stub(
+        token: String? = blueToken,
+        additionalHeaders: Metadata = Metadata(),
+    ): FeatureServiceGrpc.FeatureServiceBlockingStub {
         if (token != null) additionalHeaders.put(TokenAuthenticationInterceptor.AUTHORIZATION, "Bearer $token")
-        return FeatureServiceGrpc.newBlockingStub(channel).withDeadlineAfter(5, TimeUnit.SECONDS)
+        return FeatureServiceGrpc
+            .newBlockingStub(channel)
+            .withDeadlineAfter(5, TimeUnit.SECONDS)
             .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(additionalHeaders))
     }
 
-    private fun expect(code: Status.Code, action: () -> Unit) {
+    private fun expect(
+        code: Status.Code,
+        action: () -> Unit,
+    ) {
         assertEquals(code, assertThrows(StatusRuntimeException::class.java, action).status.code)
     }
 
@@ -147,9 +211,16 @@ class FeatureGrpcTests {
         assertNotEquals(extra.token, row.tokenHash)
         assertFalse(row.toString().contains(row.tokenHash))
         assertFalse(extra.toString().contains(extra.token))
-        assertTrue(org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().matches(extra.token.substringAfter('.'), row.tokenHash))
+        assertTrue(
+            org.springframework.security.crypto.bcrypt
+                .BCryptPasswordEncoder()
+                .matches(extra.token.substringAfter('.'), row.tokenHash),
+        )
         `when`(tokenRepository.findByIdAndNamespaceId(extra.id, blue.id!!)).thenReturn(row)
-        doAnswer { tokenRows.remove(it.getArgument<NamespaceAccessToken>(0).id); null }.`when`(tokenRepository).delete(row)
+        doAnswer {
+            tokenRows.remove(it.getArgument<NamespaceAccessToken>(0).id)
+            null
+        }.`when`(tokenRepository).delete(row)
         tokenService.revoke("blue", extra.id)
         assertNull(tokenService.authenticate(extra.token))
         assertEquals(blue.id, tokenService.authenticate(blueToken))
@@ -167,17 +238,43 @@ class FeatureGrpcTests {
         val fields = detail.detailsList.first { it.`is`(BadRequest::class.java) }.unpack(BadRequest::class.java)
         assertEquals("key", fields.fieldViolationsList.single().field)
         val unauthorized = assertThrows(StatusRuntimeException::class.java) { stub(null).getBooleanFeature(request()) }
-        assertEquals("UNAUTHORIZED", StatusProto.fromThrowable(unauthorized)!!.detailsList.single().unpack(ErrorInfo::class.java).reason)
+        assertEquals(
+            "UNAUTHORIZED",
+            StatusProto
+                .fromThrowable(unauthorized)!!
+                .detailsList
+                .single()
+                .unpack(ErrorInfo::class.java)
+                .reason,
+        )
         val mismatch = assertThrows(StatusRuntimeException::class.java) { stub().getEnumFeature(request()) }
-        assertEquals("FEATURE_TYPE_MISMATCH", StatusProto.fromThrowable(mismatch)!!.detailsList.single().unpack(ErrorInfo::class.java).reason)
+        assertEquals(
+            "FEATURE_TYPE_MISMATCH",
+            StatusProto
+                .fromThrowable(mismatch)!!
+                .detailsList
+                .single()
+                .unpack(ErrorInfo::class.java)
+                .reason,
+        )
     }
 
     @Test
     fun `authentication storage failure is unavailable with safe rich details`() {
-        `when`(tokenRepository.findById(any(UUID::class.java))).thenThrow(org.springframework.dao.DataAccessResourceFailureException("private"))
+        `when`(
+            tokenRepository.findById(any(UUID::class.java)),
+        ).thenThrow(org.springframework.dao.DataAccessResourceFailureException("private"))
         val error = assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request()) }
         assertEquals(Status.Code.UNAVAILABLE, error.status.code)
-        assertEquals("SERVICE_UNAVAILABLE", StatusProto.fromThrowable(error)!!.detailsList.single().unpack(ErrorInfo::class.java).reason)
+        assertEquals(
+            "SERVICE_UNAVAILABLE",
+            StatusProto
+                .fromThrowable(error)!!
+                .detailsList
+                .single()
+                .unpack(ErrorInfo::class.java)
+                .reason,
+        )
         assertFalse(error.message!!.contains("private"))
     }
 }

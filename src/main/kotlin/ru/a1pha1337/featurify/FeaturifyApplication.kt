@@ -14,5 +14,5 @@ import org.springframework.boot.runApplication
 class FeaturifyApplication : AppShellConfigurator
 
 fun main(args: Array<String>) {
-	runApplication<FeaturifyApplication>(*args)
+    runApplication<FeaturifyApplication>(*args)
 }

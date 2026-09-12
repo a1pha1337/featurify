@@ -10,14 +10,33 @@ import com.vaadin.flow.component.textfield.TextField
 import com.vaadin.flow.server.VaadinSession
 import jakarta.validation.Validation
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.*
+import org.mockito.Mockito.RETURNS_DEEP_STUBS
+import org.mockito.Mockito.any
+import org.mockito.Mockito.anyBoolean
+import org.mockito.Mockito.anyString
+import org.mockito.Mockito.doAnswer
+import org.mockito.Mockito.eq
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.never
+import org.mockito.Mockito.nullable
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.`when`
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import ru.a1pha1337.featurify.domain.FeatureType
-import ru.a1pha1337.featurify.dto.*
+import ru.a1pha1337.featurify.dto.AdminFeatureResponse
+import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
+import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
+import ru.a1pha1337.featurify.dto.CreateFeatureRequest
+import ru.a1pha1337.featurify.dto.CreatedAccessTokenResponse
+import ru.a1pha1337.featurify.dto.FeatureGroupResponse
+import ru.a1pha1337.featurify.dto.NamespaceResponse
+import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.service.FeatureToggleService
 import java.time.Instant
 import java.util.UUID
@@ -32,8 +51,18 @@ class MainViewTests {
     private val source = FeatureGroupResponse(UUID.randomUUID(), "source", "Source", 1, now, now)
     private val target = source.copy(id = UUID.randomUUID(), key = "target", displayName = "Target")
     private val groups = mutableListOf(source, target)
-    private var feature = AdminFeatureResponse("source", "checkout.enabled", FeatureType.BOOLEAN, true,
-        null, "Checkout flag", 7, now, now)
+    private var feature =
+        AdminFeatureResponse(
+            "source",
+            "checkout.enabled",
+            FeatureType.BOOLEAN,
+            true,
+            null,
+            "Checkout flag",
+            7,
+            now,
+            now,
+        )
     private lateinit var view: MainView
 
     @BeforeEach
@@ -71,8 +100,10 @@ class MainViewTests {
         val dialog = dialog()
 
         assertTrue(components(dialog).filterIsInstance<com.vaadin.flow.component.checkbox.Checkbox>().isEmpty())
-        assertEquals(setOf("Namespace key", "Display name"),
-            components(dialog).filterIsInstance<TextField>().map { it.label }.toSet())
+        assertEquals(
+            setOf("Namespace key", "Display name"),
+            components(dialog).filterIsInstance<TextField>().map { it.label }.toSet(),
+        )
     }
 
     @Test
@@ -103,7 +134,15 @@ class MainViewTests {
         choose(combo(view, "Group"), "Source (source)")
         grid().select(feature)
         assertTrue(button(view, "Edit").isEnabled)
-        `when`(service.editFeature("blue", feature.key, "source", "target", PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))).thenAnswer {
+        `when`(
+            service.editFeature(
+                "blue",
+                feature.key,
+                "source",
+                "target",
+                PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+            ),
+        ).thenAnswer {
             feature = feature.copy(group = "target", version = 8)
             feature
         }
@@ -113,7 +152,15 @@ class MainViewTests {
 
         button(dialog, "Save").click()
 
-        verify(service).editFeature("blue", feature.key, "source", "target", PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))
+        verify(
+            service,
+        ).editFeature(
+            "blue",
+            feature.key,
+            "source",
+            "target",
+            PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+        )
         assertFalse(dialog.isOpened)
         assertEquals("Target (target)", selectedLabel(combo(view, "Group")))
         assertFalse(button(view, "Edit").isEnabled)
@@ -122,7 +169,15 @@ class MainViewTests {
     @Test
     fun `move to Global is explicit`() {
         grid().select(feature)
-        `when`(service.editFeature("blue", feature.key, "source", null, PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))).thenAnswer {
+        `when`(
+            service.editFeature(
+                "blue",
+                feature.key,
+                "source",
+                null,
+                PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+            ),
+        ).thenAnswer {
             feature = feature.copy(group = null, version = 8)
             feature
         }
@@ -134,13 +189,22 @@ class MainViewTests {
 
         button(dialog, "Save").click()
 
-        verify(service).editFeature("blue", feature.key, "source", null, PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))
+        verify(
+            service,
+        ).editFeature(
+            "blue",
+            feature.key,
+            "source",
+            null,
+            PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+        )
         assertEquals("All groups", selectedLabel(combo(view, "Group")))
     }
 
     @Test
     fun `switching namespace clears selection and keeps group creation enabled`() {
-        val other = namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
+        val other =
+            namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
         `when`(service.listGroups("other")).thenReturn(emptyList())
         `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
             .thenReturn(PageImpl(emptyList()))
@@ -158,8 +222,18 @@ class MainViewTests {
     @Test
     fun `failed move keeps dialog open for correction`() {
         grid().select(feature)
-        `when`(service.editFeature("blue", feature.key, "source", "target", PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true)))
-            .thenThrow(ru.a1pha1337.featurify.service.ConflictException("Target already contains this key"))
+        `when`(
+            service.editFeature(
+                "blue",
+                feature.key,
+                "source",
+                "target",
+                PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+            ),
+        ).thenThrow(
+            ru.a1pha1337.featurify.service
+                .ConflictException("Target already contains this key"),
+        )
         button(view, "Edit").click()
         val dialog = dialog()
         choose(combo(dialog, "Group"), "Target (target)")
@@ -192,7 +266,8 @@ class MainViewTests {
 
     @Test
     fun `namespace deletion confirms cascade and selects default afterwards`() {
-        val other = namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
+        val other =
+            namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
         `when`(service.listGroups("other")).thenReturn(emptyList())
         `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
             .thenReturn(PageImpl(emptyList()))
@@ -242,7 +317,10 @@ class MainViewTests {
     fun `failed inline switch leaves persisted value displayed`() {
         val toggle = valueEditor() as Button
         `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, booleanValue = false)))
-            .thenThrow(ru.a1pha1337.featurify.service.ConflictException("Stale version"))
+            .thenThrow(
+                ru.a1pha1337.featurify.service
+                    .ConflictException("Stale version"),
+            )
         toggle.click()
         assertEquals("true", toggle.element.getAttribute("aria-checked"))
     }
@@ -256,14 +334,23 @@ class MainViewTests {
         `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, enumValue = "b")))
             .thenReturn(feature.copy(value = "b", version = 8))
         picker.value = "b"
-        com.vaadin.flow.component.ComponentUtil.fireEvent(picker,
-            com.vaadin.flow.component.AbstractField.ComponentValueChangeEvent(picker, picker, "a", true))
+        com.vaadin.flow.component.ComponentUtil.fireEvent(
+            picker,
+            com.vaadin.flow.component.AbstractField
+                .ComponentValueChangeEvent(picker, picker, "a", true),
+        )
         assertEquals("b", picker.value)
         `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, enumValue = "a")))
-            .thenThrow(ru.a1pha1337.featurify.service.ConflictException("Stale version"))
+            .thenThrow(
+                ru.a1pha1337.featurify.service
+                    .ConflictException("Stale version"),
+            )
         picker.value = "a"
-        com.vaadin.flow.component.ComponentUtil.fireEvent(picker,
-            com.vaadin.flow.component.AbstractField.ComponentValueChangeEvent(picker, picker, "b", true))
+        com.vaadin.flow.component.ComponentUtil.fireEvent(
+            picker,
+            com.vaadin.flow.component.AbstractField
+                .ComponentValueChangeEvent(picker, picker, "b", true),
+        )
         assertEquals("b", picker.value)
     }
 
@@ -274,10 +361,16 @@ class MainViewTests {
         val dialog = dialog()
         combo(dialog, "Type").value = FeatureType.ENUM
         field(dialog, "Key").value = "language"
-        val tags = components(dialog).filterIsInstance<com.vaadin.flow.component.combobox.MultiSelectComboBox<*>>().single()
-            as com.vaadin.flow.component.combobox.MultiSelectComboBox<String>
-        fun add(text: String) = com.vaadin.flow.component.ComponentUtil.fireEvent(tags,
-            com.vaadin.flow.component.combobox.ComboBoxBase.CustomValueSetEvent(tags, true, text))
+        val tags =
+            components(dialog).filterIsInstance<com.vaadin.flow.component.combobox.MultiSelectComboBox<*>>().single()
+                as com.vaadin.flow.component.combobox.MultiSelectComboBox<String>
+
+        fun add(text: String) =
+            com.vaadin.flow.component.ComponentUtil.fireEvent(
+                tags,
+                com.vaadin.flow.component.combobox.ComboBoxBase
+                    .CustomValueSetEvent(tags, true, text),
+            )
         add("  English  ")
         add("French")
         combo(dialog, "Current enum value").value = "French"
@@ -291,9 +384,15 @@ class MainViewTests {
         assertTrue(tags.isInvalid)
         add("Italian")
         button(dialog, "Create").click()
-        verify(service).createFeature("blue", CreateFeatureRequest(
-            key = "language", type = FeatureType.ENUM, enumValue = "English", enumOptions = listOf("English", "Italian"),
-        ))
+        verify(service).createFeature(
+            "blue",
+            CreateFeatureRequest(
+                key = "language",
+                type = FeatureType.ENUM,
+                enumValue = "English",
+                enumOptions = listOf("English", "Italian"),
+            ),
+        )
     }
 
     @Test
@@ -318,30 +417,64 @@ class MainViewTests {
     }
 
     private fun components(root: Component): List<Component> =
-        listOf(root) + root.element.children.toList().flatMap { element ->
-            element.component.map { components(it) }.orElse(emptyList())
-        }
-    private fun button(root: Component, text: String): Button {
-        val candidates = components(root) + if (root is Dialog) {
-            root.footer.element.children.toList().mapNotNull { it.component.orElse(null) }.flatMap(::components)
-        } else emptyList()
+        listOf(root) +
+            root.element.children.toList().flatMap { element ->
+                element.component.map { components(it) }.orElse(emptyList())
+            }
+
+    private fun button(
+        root: Component,
+        text: String,
+    ): Button {
+        val candidates =
+            components(root) +
+                if (root is Dialog) {
+                    root.footer.element.children
+                        .toList()
+                        .mapNotNull { it.component.orElse(null) }
+                        .flatMap(::components)
+                } else {
+                    emptyList()
+                }
         return candidates.filterIsInstance<Button>().distinct().single { it.text == text }
     }
-    private fun field(root: Component, label: String) = components(root).filterIsInstance<TextField>().single { it.label == label }
+
+    private fun field(
+        root: Component,
+        label: String,
+    ) = components(root).filterIsInstance<TextField>().single { it.label == label }
+
     private fun dialog(): Dialog {
         ui.internals.stateTree.runExecutionsBeforeClientResponse()
         return components(ui).filterIsInstance<Dialog>().single { it.isOpened }
     }
+
     @Suppress("UNCHECKED_CAST")
     private fun grid() = components(view).filterIsInstance<Grid<*>>().single() as Grid<AdminFeatureResponse>
+
     @Suppress("UNCHECKED_CAST")
-    private fun combo(root: Component, label: String) =
-        components(root).filterIsInstance<ComboBox<*>>().single { it.label == label } as ComboBox<Any>
+    private fun combo(
+        root: Component,
+        label: String,
+    ) = components(root).filterIsInstance<ComboBox<*>>().single { it.label == label } as ComboBox<Any>
+
     private fun selectedLabel(combo: ComboBox<Any>) = combo.itemLabelGenerator.apply(combo.value)
-    private fun choose(combo: ComboBox<Any>, label: String) {
-        combo.value = combo.listDataView.items.toList().single { combo.itemLabelGenerator.apply(it) == label }
+
+    private fun choose(
+        combo: ComboBox<Any>,
+        label: String,
+    ) {
+        combo.value =
+            combo.listDataView.items
+                .toList()
+                .single { combo.itemLabelGenerator.apply(it) == label }
     }
-    private fun anyPage(): Pageable = any(Pageable::class.java) ?: org.springframework.data.domain.PageRequest.of(0, 20)
+
+    private fun anyPage(): Pageable =
+        any(Pageable::class.java) ?: org.springframework.data.domain.PageRequest
+            .of(0, 20)
+
     private fun nullableQuery(): String? = nullable(String::class.java)
+
     private fun anyRequest(): CreateFeatureGroupRequest = any(CreateFeatureGroupRequest::class.java) ?: CreateFeatureGroupRequest("", "")
 }

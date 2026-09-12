@@ -12,16 +12,16 @@ import org.mockito.Mockito.`when`
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
-import ru.a1pha1337.featurify.dto.CreateFeatureRequest
-import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
-import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
-import ru.a1pha1337.featurify.dto.MoveFeatureRequest
-import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
+import ru.a1pha1337.featurify.dto.CreateFeatureRequest
+import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
+import ru.a1pha1337.featurify.dto.MoveFeatureRequest
+import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
 import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
@@ -31,8 +31,8 @@ import ru.a1pha1337.featurify.security.ActorProvider
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
-import java.util.UUID
 import java.util.Optional
+import java.util.UUID
 
 class FeatureToggleServiceTests {
     private val namespaceRepository = mock(NamespaceRepository::class.java)
@@ -49,15 +49,16 @@ class FeatureToggleServiceTests {
     @BeforeEach
     fun setUp() {
         `when`(actorProvider.currentUsername()).thenReturn("test-user")
-        service = FeatureToggleService(
-            namespaceRepository,
-            featureRepository,
-            groupRepository,
-            optionRepository,
-            auditRepository,
-            actorProvider,
-            Clock.fixed(now, ZoneOffset.UTC),
-        )
+        service =
+            FeatureToggleService(
+                namespaceRepository,
+                featureRepository,
+                groupRepository,
+                optionRepository,
+                auditRepository,
+                actorProvider,
+                Clock.fixed(now, ZoneOffset.UTC),
+            )
         `when`(namespaceRepository.findByKey("blue")).thenReturn(
             Namespace(namespaceId, "blue", "Blue", true, now, now),
         )
@@ -65,17 +66,18 @@ class FeatureToggleServiceTests {
 
     @Test
     fun `enum current value must be one of its options`() {
-        val exception = assertThrows(DomainValidationException::class.java) {
-            service.createFeature(
-                "blue",
-                CreateFeatureRequest(
-                    key = "checkout.pet",
-                    type = FeatureType.ENUM,
-                    enumValue = "DOG",
-                    enumOptions = listOf("CAT", "MONKEY"),
-                ),
-            )
-        }
+        val exception =
+            assertThrows(DomainValidationException::class.java) {
+                service.createFeature(
+                    "blue",
+                    CreateFeatureRequest(
+                        key = "checkout.pet",
+                        type = FeatureType.ENUM,
+                        enumValue = "DOG",
+                        enumOptions = listOf("CAT", "MONKEY"),
+                    ),
+                )
+            }
 
         assertEquals("enumValue", exception.violations.single().first)
         verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
@@ -86,14 +88,24 @@ class FeatureToggleServiceTests {
         `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
             .thenAnswer { it.getArgument<Feature>(0).copy(id = featureId, version = 0) }
         listOf("camelCase", "PascalCase", "kebab-case", "checkout.payment-provider", "release2").forEach { key ->
-            val created = service.createFeature("blue", CreateFeatureRequest(key, FeatureType.BOOLEAN, booleanValue = true))
+            val created =
+                service.createFeature("blue", CreateFeatureRequest(key, FeatureType.BOOLEAN, booleanValue = true))
             assertEquals(key, created.key)
         }
     }
 
     @Test
     fun `feature creation rejects underscore special characters and digit start`() {
-        listOf("snake_case", "with space", "-leading", "trailing-", "with..double", "with.-mixed", "with--double", "2release").forEach { key ->
+        listOf(
+            "snake_case",
+            "with space",
+            "-leading",
+            "trailing-",
+            "with..double",
+            "with.-mixed",
+            "with--double",
+            "2release",
+        ).forEach { key ->
             assertThrows(DomainValidationException::class.java) {
                 service.createFeature("blue", CreateFeatureRequest(key, FeatureType.BOOLEAN, booleanValue = true))
             }
@@ -152,7 +164,9 @@ class FeatureToggleServiceTests {
         val feature = booleanFeature(version = 2).copy(groupId = sourceId)
         `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "old")).thenReturn(source)
         `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "new")).thenReturn(target)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, sourceId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, sourceId, feature.key)).thenReturn(
+            feature,
+        )
         `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
             .thenAnswer { invocation -> invocation.getArgument(0) }
         `when`(groupRepository.findById(targetId)).thenReturn(Optional.of(target))
@@ -207,9 +221,10 @@ class FeatureToggleServiceTests {
     fun `feature search requires at least three characters`() {
         val pageable = PageRequest.of(0, 10)
 
-        val exception = assertThrows(DomainValidationException::class.java) {
-            service.listFeatures("blue", pageable, "ab")
-        }
+        val exception =
+            assertThrows(DomainValidationException::class.java) {
+                service.listFeatures("blue", pageable, "ab")
+            }
 
         assertEquals("query", exception.violations.single().first)
     }
@@ -239,16 +254,17 @@ class FeatureToggleServiceTests {
 
     @Test
     fun `enum patch validates against options`() {
-        val feature = Feature(
-            id = featureId,
-            namespaceId = namespaceId,
-            key = "checkout.pet",
-            type = FeatureType.ENUM,
-            enumValue = "CAT",
-            version = 1,
-            createdAt = now,
-            updatedAt = now,
-        )
+        val feature =
+            Feature(
+                id = featureId,
+                namespaceId = namespaceId,
+                key = "checkout.pet",
+                type = FeatureType.ENUM,
+                enumValue = "CAT",
+                version = 1,
+                createdAt = now,
+                updatedAt = now,
+            )
         `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
         `when`(optionRepository.findAllByFeatureIdOrderBySortOrder(featureId)).thenReturn(
             listOf(FeatureEnumOption(UUID.randomUUID(), featureId, "CAT", 0)),
@@ -262,7 +278,9 @@ class FeatureToggleServiceTests {
     @Test
     fun `group creation normalizes input and saves an empty group`() {
         `when`(groupRepository.save(org.mockito.ArgumentMatchers.any(FeatureGroup::class.java)))
-            .thenAnswer { invocation -> invocation.getArgument<FeatureGroup>(0).copy(id = UUID.randomUUID(), version = 0) }
+            .thenAnswer { invocation ->
+                invocation.getArgument<FeatureGroup>(0).copy(id = UUID.randomUUID(), version = 0)
+            }
 
         val result = service.createGroup("blue", CreateFeatureGroupRequest(" checkout ", " Checkout "))
 
@@ -291,7 +309,9 @@ class FeatureToggleServiceTests {
         val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(2).copy(groupId = groupId)
         `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key)).thenReturn(
+            feature,
+        )
         `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
             .thenAnswer { it.getArgument<Feature>(0) }
 
@@ -325,16 +345,24 @@ class FeatureToggleServiceTests {
         val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val page = PageRequest.of(1, 20)
         `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
-            namespaceId, groupId, "checkout", page,
-        )).thenReturn(PageImpl(emptyList(), page, 21))
+        `when`(
+            featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
+                namespaceId,
+                groupId,
+                "checkout",
+                page,
+            ),
+        ).thenReturn(PageImpl(emptyList(), page, 21))
 
         val result = service.listForAdmin("blue", page, " CHECKOUT ", "checkout")
 
         assertEquals(21, result.totalElements)
         assertEquals(1, result.number)
         verify(featureRepository).findAllByNamespaceIdAndGroupIdAndKeyContaining(
-            namespaceId, groupId, "checkout", page,
+            namespaceId,
+            groupId,
+            "checkout",
+            page,
         )
     }
 
@@ -365,9 +393,10 @@ class FeatureToggleServiceTests {
 
     @Test
     fun `system default namespace cannot be created through service`() {
-        val error = assertThrows(DomainValidationException::class.java) {
-            service.createNamespace(CreateNamespaceRequest("default", "Replacement"))
-        }
+        val error =
+            assertThrows(DomainValidationException::class.java) {
+                service.createNamespace(CreateNamespaceRequest("default", "Replacement"))
+            }
 
         assertEquals("key", error.violations.single().first)
         verify(namespaceRepository, never()).save(org.mockito.ArgumentMatchers.any())
@@ -386,7 +415,16 @@ class FeatureToggleServiceTests {
 
     @Test
     fun `delete group requires current version`() {
-        val group = FeatureGroup(UUID.randomUUID(), namespaceId, "checkout", "Checkout", version = 3, createdAt = now, updatedAt = now)
+        val group =
+            FeatureGroup(
+                UUID.randomUUID(),
+                namespaceId,
+                "checkout",
+                "Checkout",
+                version = 3,
+                createdAt = now,
+                updatedAt = now,
+            )
         `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, group.key)).thenReturn(group)
         assertThrows(ConflictException::class.java) { service.deleteGroup("blue", group.key, 2) }
         assertThrows(DomainValidationException::class.java) { service.deleteGroup("blue", group.key, null) }
@@ -407,14 +445,15 @@ class FeatureToggleServiceTests {
         verify(namespaceRepository).delete(blue)
     }
 
-    private fun booleanFeature(version: Long) = Feature(
-        id = featureId,
-        namespaceId = namespaceId,
-        key = "checkout.enabled",
-        type = FeatureType.BOOLEAN,
-        booleanValue = false,
-        version = version,
-        createdAt = now,
-        updatedAt = now,
-    )
+    private fun booleanFeature(version: Long) =
+        Feature(
+            id = featureId,
+            namespaceId = namespaceId,
+            key = "checkout.enabled",
+            type = FeatureType.BOOLEAN,
+            booleanValue = false,
+            version = version,
+            createdAt = now,
+            updatedAt = now,
+        )
 }

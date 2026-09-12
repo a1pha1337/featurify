@@ -20,8 +20,9 @@ data class Feature(
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
-    fun valueAsString(): String = when (type) {
-        FeatureType.BOOLEAN -> booleanValue.toString()
-        FeatureType.ENUM -> enumValue!!
-    }
+    fun valueAsString(): String =
+        when (type) {
+            FeatureType.BOOLEAN -> booleanValue.toString()
+            FeatureType.ENUM -> enumValue!!
+        }
 }

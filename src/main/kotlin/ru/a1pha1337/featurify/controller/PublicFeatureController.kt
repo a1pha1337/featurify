@@ -11,12 +11,14 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import ru.a1pha1337.featurify.dto.FeatureResponse
 import ru.a1pha1337.featurify.dto.ResolveResponse
-import ru.a1pha1337.featurify.service.FeatureToggleService
 import ru.a1pha1337.featurify.security.NamespacePrincipal
+import ru.a1pha1337.featurify.service.FeatureToggleService
 
 @RestController
 @RequestMapping("/api/v1")
-class PublicFeatureController(private val service: FeatureToggleService) {
+class PublicFeatureController(
+    private val service: FeatureToggleService,
+) {
     @GetMapping("/features")
     fun list(
         @AuthenticationPrincipal(errorOnInvalidType = true) principal: NamespacePrincipal,

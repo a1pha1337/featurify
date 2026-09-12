@@ -14,30 +14,35 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
 import ru.a1pha1337.featurify.dto.AuditLogResponse
-import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
-import ru.a1pha1337.featurify.dto.FeatureGroupResponse
+import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
+import ru.a1pha1337.featurify.dto.FeatureGroupResponse
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
-import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.NamespaceResponse
+import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.VersionRequest
 import ru.a1pha1337.featurify.service.FeatureToggleService
 
 @RestController
 @RequestMapping("/api/v1")
-class AdminFeatureController(private val service: FeatureToggleService) {
+class AdminFeatureController(
+    private val service: FeatureToggleService,
+) {
     @PostMapping("/namespaces")
     @ResponseStatus(HttpStatus.CREATED)
-    fun createNamespace(@Valid @RequestBody request: CreateNamespaceRequest): NamespaceResponse =
-        service.createNamespace(request)
+    fun createNamespace(
+        @Valid @RequestBody request: CreateNamespaceRequest,
+    ): NamespaceResponse = service.createNamespace(request)
 
     @GetMapping("/namespaces")
     fun listNamespaces(): List<NamespaceResponse> = service.listNamespaces()
 
     @DeleteMapping("/namespaces/{namespaceKey}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteNamespace(@PathVariable namespaceKey: String) = service.deleteNamespace(namespaceKey)
+    fun deleteNamespace(
+        @PathVariable namespaceKey: String,
+    ) = service.deleteNamespace(namespaceKey)
 
     @PostMapping("/groups")
     @ResponseStatus(HttpStatus.CREATED)
@@ -47,8 +52,9 @@ class AdminFeatureController(private val service: FeatureToggleService) {
     ): FeatureGroupResponse = service.createGroup(namespace, request)
 
     @GetMapping("/groups")
-    fun listGroups(@RequestParam(required = false) namespace: String?): List<FeatureGroupResponse> =
-        service.listGroups(namespace)
+    fun listGroups(
+        @RequestParam(required = false) namespace: String?,
+    ): List<FeatureGroupResponse> = service.listGroups(namespace)
 
     @DeleteMapping("/groups/{groupKey}")
     @ResponseStatus(HttpStatus.NO_CONTENT)

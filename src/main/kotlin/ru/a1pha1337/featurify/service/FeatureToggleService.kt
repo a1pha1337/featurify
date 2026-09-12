@@ -5,18 +5,6 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import ru.a1pha1337.featurify.dto.AdminFeatureResponse
-import ru.a1pha1337.featurify.dto.AuditLogResponse
-import ru.a1pha1337.featurify.dto.CreateFeatureRequest
-import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
-import ru.a1pha1337.featurify.dto.FeatureGroupResponse
-import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
-import ru.a1pha1337.featurify.dto.FeatureResponse
-import ru.a1pha1337.featurify.dto.MoveFeatureRequest
-import ru.a1pha1337.featurify.dto.PatchFeatureRequest
-import ru.a1pha1337.featurify.dto.ResolveResponse
-import ru.a1pha1337.featurify.dto.NamespaceResponse
-import ru.a1pha1337.featurify.dto.ValidationPatterns
 import ru.a1pha1337.featurify.domain.AuditOperation
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureAuditLog
@@ -24,6 +12,18 @@ import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.dto.AdminFeatureResponse
+import ru.a1pha1337.featurify.dto.AuditLogResponse
+import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
+import ru.a1pha1337.featurify.dto.CreateFeatureRequest
+import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
+import ru.a1pha1337.featurify.dto.FeatureGroupResponse
+import ru.a1pha1337.featurify.dto.FeatureResponse
+import ru.a1pha1337.featurify.dto.MoveFeatureRequest
+import ru.a1pha1337.featurify.dto.NamespaceResponse
+import ru.a1pha1337.featurify.dto.PatchFeatureRequest
+import ru.a1pha1337.featurify.dto.ResolveResponse
+import ru.a1pha1337.featurify.dto.ValidationPatterns
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
 import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
@@ -31,7 +31,6 @@ import ru.a1pha1337.featurify.repository.FeatureRepository
 import ru.a1pha1337.featurify.repository.NamespaceRepository
 import ru.a1pha1337.featurify.security.ActorProvider
 import java.time.Clock
-import java.time.Instant
 import java.util.UUID
 
 @Service
@@ -49,22 +48,26 @@ class FeatureToggleService(
         val key = normalizeNamespaceKey(request.key)
         val now = clock.instant()
         if (key == "default") throw validation("key", "is reserved for the system Default namespace")
-        return namespaceRepository.save(
-            Namespace(
-                key = key,
-                displayName = request.displayName,
-                createdAt = now,
-                updatedAt = now,
-                defaultNamespace = false,
-            ),
-        ).toResponse()
+        return namespaceRepository
+            .save(
+                Namespace(
+                    key = key,
+                    displayName = request.displayName,
+                    createdAt = now,
+                    updatedAt = now,
+                    defaultNamespace = false,
+                ),
+            ).toResponse()
     }
 
     @Transactional(readOnly = true)
     fun listNamespaces(): List<NamespaceResponse> = namespaceRepository.findAllByOrderByKey().map { it.toResponse() }
 
     @Transactional
-    fun createGroup(namespaceKey: String?, request: CreateFeatureGroupRequest): FeatureGroupResponse {
+    fun createGroup(
+        namespaceKey: String?,
+        request: CreateFeatureGroupRequest,
+    ): FeatureGroupResponse {
         val namespace = requireNamespace(namespaceKey)
         val key = normalizeGroup(request.key) ?: throw validation("key", "must not be blank")
         if (request.displayName.isBlank() || request.displayName.length > 255) {
@@ -74,15 +77,16 @@ class FeatureToggleService(
             throw ConflictException("Group '$key' already exists in this namespace. Choose another key.")
         }
         val now = clock.instant()
-        return groupRepository.save(
-            FeatureGroup(
-                namespaceId = namespace.id!!,
-                key = key,
-                displayName = request.displayName.trim(),
-                createdAt = now,
-                updatedAt = now,
-            ),
-        ).toResponse()
+        return groupRepository
+            .save(
+                FeatureGroup(
+                    namespaceId = namespace.id!!,
+                    key = key,
+                    displayName = request.displayName.trim(),
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            ).toResponse()
     }
 
     @Transactional(readOnly = true)
@@ -101,7 +105,11 @@ class FeatureToggleService(
     }
 
     @Transactional
-    fun deleteGroup(namespaceKey: String?, groupKey: String, version: Long?) {
+    fun deleteGroup(
+        namespaceKey: String?,
+        groupKey: String,
+        version: Long?,
+    ) {
         val namespace = requireNamespace(namespaceKey)
         val group = requireGroup(namespace.id!!, groupKey)
         requireVersion(group.version, version)
@@ -126,11 +134,12 @@ class FeatureToggleService(
         val targetGroupKey = normalizeGroup(request.targetGroup)
         val targetGroup = targetGroupKey?.let { requireGroup(namespace.id!!, it) }
         if (targetGroup?.id == current.groupId) return current.toAdminResponse(targetGroupKey, optionsFor(current))
-        val existing = if (targetGroup == null) {
-            featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespace.id, key)
-        } else {
-            featureRepository.findByNamespaceIdAndGroupIdAndKey(namespace.id, targetGroup.id!!, key)
-        }
+        val existing =
+            if (targetGroup == null) {
+                featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespace.id, key)
+            } else {
+                featureRepository.findByNamespaceIdAndGroupIdAndKey(namespace.id, targetGroup.id!!, key)
+            }
         if (existing != null) {
             throw ConflictException("Feature '$key' already exists in ${targetGroupKey ?: "Global"}. Choose another group.")
         }
@@ -139,26 +148,30 @@ class FeatureToggleService(
     }
 
     @Transactional
-    fun createFeature(namespaceKey: String?, request: CreateFeatureRequest): AdminFeatureResponse {
+    fun createFeature(
+        namespaceKey: String?,
+        request: CreateFeatureRequest,
+    ): AdminFeatureResponse {
         val namespace = requireNamespace(namespaceKey)
         val key = normalizeFeatureKey(request.key)
         val type = request.type ?: throw validation("type", "must not be null")
         val group = normalizeGroup(request.group)?.let { requireGroup(namespace.id!!, it) }
         validateCreation(request, type)
         val now = clock.instant()
-        val saved = featureRepository.save(
-            Feature(
-                namespaceId = namespace.id!!,
-                key = key,
-                type = type,
-                groupId = group?.id,
-                booleanValue = request.booleanValue,
-                enumValue = request.enumValue,
-                description = request.description,
-                createdAt = now,
-                updatedAt = now,
-            ),
-        )
+        val saved =
+            featureRepository.save(
+                Feature(
+                    namespaceId = namespace.id!!,
+                    key = key,
+                    type = type,
+                    groupId = group?.id,
+                    booleanValue = request.booleanValue,
+                    enumValue = request.enumValue,
+                    description = request.description,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
         if (type == FeatureType.ENUM) {
             val featureId = checkNotNull(saved.id)
             optionRepository.saveAll(
@@ -171,45 +184,68 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun listFeatures(namespaceKey: String?, pageable: Pageable, query: String?): Page<FeatureResponse> {
+    fun listFeatures(
+        namespaceKey: String?,
+        pageable: Pageable,
+        query: String?,
+    ): Page<FeatureResponse> {
         val namespace = requireActiveNamespace(namespaceKey)
         return listFeaturesInNamespace(namespace.id!!, pageable, query)
     }
 
     @Transactional(readOnly = true)
-    fun listFeaturesInNamespace(namespaceId: UUID, pageable: Pageable, query: String?): Page<FeatureResponse> {
+    fun listFeaturesInNamespace(
+        namespaceId: UUID,
+        pageable: Pageable,
+        query: String?,
+    ): Page<FeatureResponse> {
         val normalizedQuery = normalizeQuery(query)
-        val features = if (normalizedQuery == null) {
-            featureRepository.findAllByNamespaceId(namespaceId, pageable)
-        } else {
-            featureRepository.findAllByNamespaceIdAndKeyContaining(
-                namespaceId,
-                normalizedQuery,
-                pageable,
-            )
-        }
+        val features =
+            if (normalizedQuery == null) {
+                featureRepository.findAllByNamespaceId(namespaceId, pageable)
+            } else {
+                featureRepository.findAllByNamespaceIdAndKeyContaining(
+                    namespaceId,
+                    normalizedQuery,
+                    pageable,
+                )
+            }
         return features.map { it.toPublicResponse(groupKeyFor(it), optionsFor(it)) }
     }
 
     @Transactional(readOnly = true)
-    fun getFeature(namespaceKey: String?, key: String, group: String?): FeatureResponse {
+    fun getFeature(
+        namespaceKey: String?,
+        key: String,
+        group: String?,
+    ): FeatureResponse {
         val namespace = requireActiveNamespace(namespaceKey)
         return getFeatureInNamespace(namespace.id!!, key, group)
     }
 
     @Transactional(readOnly = true)
-    fun getFeatureInNamespace(namespaceId: UUID, key: String, group: String?): FeatureResponse {
+    fun getFeatureInNamespace(
+        namespaceId: UUID,
+        key: String,
+        group: String?,
+    ): FeatureResponse {
         val feature = requireFeature(namespaceId, key, normalizeGroup(group))
         return feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
     }
 
     @Transactional(readOnly = true)
-    fun resolve(namespaceKey: String?, keys: List<String>, group: String?): ResolveResponse {
-        return resolveInNamespace(requireActiveNamespace(namespaceKey).id!!, keys, group)
-    }
+    fun resolve(
+        namespaceKey: String?,
+        keys: List<String>,
+        group: String?,
+    ): ResolveResponse = resolveInNamespace(requireActiveNamespace(namespaceKey).id!!, keys, group)
 
     @Transactional(readOnly = true)
-    fun resolveInNamespace(namespaceId: UUID, keys: List<String>, group: String?): ResolveResponse {
+    fun resolveInNamespace(
+        namespaceId: UUID,
+        keys: List<String>,
+        group: String?,
+    ): ResolveResponse {
         if (keys.isEmpty() || keys.any { it.isBlank() }) {
             throw validation("keys", "must contain at least one non-blank key")
         }
@@ -233,37 +269,47 @@ class FeatureToggleService(
         val namespace = requireNamespace(namespaceKey)
         val normalizedQuery = normalizeQuery(query)
         val groupId = normalizeGroup(group)?.let { requireGroup(namespace.id!!, it).id!! }
-        val features = if (groupId != null) {
-            if (normalizedQuery == null) {
-                featureRepository.findAllByNamespaceIdAndGroupId(namespace.id!!, groupId, pageable)
+        val features =
+            if (groupId != null) {
+                if (normalizedQuery == null) {
+                    featureRepository.findAllByNamespaceIdAndGroupId(namespace.id!!, groupId, pageable)
+                } else {
+                    featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
+                        namespace.id!!,
+                        groupId,
+                        normalizedQuery,
+                        pageable,
+                    )
+                }
+            } else if (globalOnly) {
+                if (normalizedQuery == null) {
+                    featureRepository.findAllByNamespaceIdAndGroupIdIsNull(namespace.id!!, pageable)
+                } else {
+                    featureRepository.findAllByNamespaceIdAndGroupIdIsNullAndKeyContaining(
+                        namespace.id!!,
+                        normalizedQuery,
+                        pageable,
+                    )
+                }
+            } else if (normalizedQuery == null) {
+                featureRepository.findAllByNamespaceId(namespace.id!!, pageable)
             } else {
-                featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
-                    namespace.id!!, groupId, normalizedQuery, pageable,
+                featureRepository.findAllByNamespaceIdAndKeyContaining(
+                    namespace.id!!,
+                    normalizedQuery,
+                    pageable,
                 )
             }
-        } else if (globalOnly) {
-            if (normalizedQuery == null) {
-                featureRepository.findAllByNamespaceIdAndGroupIdIsNull(namespace.id!!, pageable)
-            } else {
-                featureRepository.findAllByNamespaceIdAndGroupIdIsNullAndKeyContaining(
-                    namespace.id!!, normalizedQuery, pageable,
-                )
-            }
-        } else if (normalizedQuery == null) {
-            featureRepository.findAllByNamespaceId(namespace.id!!, pageable)
-        } else {
-            featureRepository.findAllByNamespaceIdAndKeyContaining(
-                namespace.id!!,
-                normalizedQuery,
-                pageable,
-            )
-        }
         return features.map { it.toAdminResponse(groupKeyFor(it), optionsFor(it)) }
     }
 
     @Transactional
     fun editFeature(
-        namespaceKey: String?, key: String, group: String?, targetGroup: String?, request: PatchFeatureRequest,
+        namespaceKey: String?,
+        key: String,
+        group: String?,
+        targetGroup: String?,
+        request: PatchFeatureRequest,
     ): AdminFeatureResponse {
         val saved = patchFeature(namespaceKey, key, group, request)
         return moveFeature(namespaceKey, key, group, MoveFeatureRequest(saved.version, targetGroup))
@@ -289,12 +335,13 @@ class FeatureToggleService(
             if (request.enumValue !in allowed) throw validation("enumValue", "must be one of $allowed")
         }
 
-        val changed = current.copy(
-            booleanValue = newBoolean,
-            enumValue = newEnum,
-            description = request.description ?: current.description,
-            updatedAt = clock.instant(),
-        )
+        val changed =
+            current.copy(
+                booleanValue = newBoolean,
+                enumValue = newEnum,
+                description = request.description ?: current.description,
+                updatedAt = clock.instant(),
+            )
         val saved = saveWithConflict(changed)
         if (current.valueAsString() != saved.valueAsString()) {
             audit(namespace, saved, AuditOperation.VALUE_CHANGED, current.valueAsString(), saved.valueAsString())
@@ -303,7 +350,12 @@ class FeatureToggleService(
     }
 
     @Transactional
-    fun deleteFeature(namespaceKey: String?, key: String, group: String?, version: Long?) {
+    fun deleteFeature(
+        namespaceKey: String?,
+        key: String,
+        group: String?,
+        version: Long?,
+    ) {
         val namespace = requireNamespace(namespaceKey)
         val current = requireFeature(namespace.id!!, key, normalizeGroup(group))
         requireVersion(current, version)
@@ -315,19 +367,27 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun history(namespaceKey: String?, key: String, group: String?): List<AuditLogResponse> {
+    fun history(
+        namespaceKey: String?,
+        key: String,
+        group: String?,
+    ): List<AuditLogResponse> {
         val namespace = requireNamespace(namespaceKey)
         val groupKey = normalizeGroup(group)
         requireFeature(namespace.id!!, key, groupKey)
-        val entries = if (groupKey == null) {
-            auditRepository.findAllByNamespaceIdAndFeatureGroupIsNullAndFeatureKeyOrderByChangedAtDesc(namespace.id, key)
-        } else {
-            auditRepository.findAllByNamespaceIdAndFeatureGroupAndFeatureKeyOrderByChangedAtDesc(
-                namespace.id,
-                groupKey,
-                key,
-            )
-        }
+        val entries =
+            if (groupKey == null) {
+                auditRepository.findAllByNamespaceIdAndFeatureGroupIsNullAndFeatureKeyOrderByChangedAtDesc(
+                    namespace.id,
+                    key,
+                )
+            } else {
+                auditRepository.findAllByNamespaceIdAndFeatureGroupAndFeatureKeyOrderByChangedAtDesc(
+                    namespace.id,
+                    groupKey,
+                    key,
+                )
+            }
         return entries.map {
             AuditLogResponse(
                 group = it.featureGroup,
@@ -340,18 +400,27 @@ class FeatureToggleService(
         }
     }
 
-    private fun validateCreation(request: CreateFeatureRequest, type: FeatureType) {
+    private fun validateCreation(
+        request: CreateFeatureRequest,
+        type: FeatureType,
+    ) {
         when (type) {
             FeatureType.BOOLEAN -> {
                 if (request.booleanValue == null) throw validation("booleanValue", "is required for BOOLEAN")
                 if (request.enumValue != null) throw validation("enumValue", "is only allowed for ENUM")
                 if (request.enumOptions.isNotEmpty()) throw validation("enumOptions", "is only allowed for ENUM")
             }
+
             FeatureType.ENUM -> {
                 if (request.booleanValue != null) throw validation("booleanValue", "is only allowed for BOOLEAN")
                 if (request.enumValue.isNullOrBlank()) throw validation("enumValue", "is required for ENUM")
                 if (request.enumOptions.isEmpty()) throw validation("enumOptions", "must not be empty for ENUM")
-                if (request.enumOptions.any { it.isBlank() }) throw validation("enumOptions", "must not contain blank values")
+                if (request.enumOptions.any { it.isBlank() }) {
+                    throw validation(
+                        "enumOptions",
+                        "must not contain blank values",
+                    )
+                }
                 if (request.enumOptions.distinct().size != request.enumOptions.size) {
                     throw validation("enumOptions", "must not contain duplicates")
                 }
@@ -362,7 +431,10 @@ class FeatureToggleService(
         }
     }
 
-    private fun validatePatch(current: Feature, request: PatchFeatureRequest) {
+    private fun validatePatch(
+        current: Feature,
+        request: PatchFeatureRequest,
+    ) {
         if (request.description == null && request.booleanValue == null && request.enumValue == null) {
             throw validation("request", "must change value and/or description")
         }
@@ -374,18 +446,22 @@ class FeatureToggleService(
         }
     }
 
-    private fun requireVersion(feature: Feature, requested: Long?) {
+    private fun requireVersion(
+        feature: Feature,
+        requested: Long?,
+    ) {
         if (requested == null) throw validation("version", "must not be null")
         if (feature.version != requested) {
             throw ConflictException("Feature was changed by another request; current version is ${feature.version}")
         }
     }
 
-    private fun saveWithConflict(feature: Feature): Feature = try {
-        featureRepository.save(feature)
-    } catch (exception: OptimisticLockingFailureException) {
-        throw ConflictException("Feature was changed by another request")
-    }
+    private fun saveWithConflict(feature: Feature): Feature =
+        try {
+            featureRepository.save(feature)
+        } catch (exception: OptimisticLockingFailureException) {
+            throw ConflictException("Feature was changed by another request")
+        }
 
     private fun audit(
         namespace: Namespace,
@@ -410,25 +486,32 @@ class FeatureToggleService(
         )
     }
 
-    private fun requireNamespace(namespaceKey: String?): Namespace = if (namespaceKey == null) {
-        namespaceRepository.findByDefaultNamespaceTrue()
-            ?: throw NotFoundException("Default namespace was not found")
-    } else {
-        namespaceRepository.findByKey(namespaceKey)
-            ?: throw NotFoundException("Namespace '$namespaceKey' was not found")
-    }
-
-    private fun requireActiveNamespace(namespaceKey: String?): Namespace = requireNamespace(namespaceKey).also {
-        if (!it.active) throw NotFoundException("Namespace '${namespaceKey ?: it.key}' was not found")
-    }
-
-    private fun requireFeature(namespaceId: UUID, key: String, group: String?): Feature {
-        val groupId = group?.let { requireGroup(namespaceId, it).id!! }
-        val feature = if (groupId == null) {
-            featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, key)
+    private fun requireNamespace(namespaceKey: String?): Namespace =
+        if (namespaceKey == null) {
+            namespaceRepository.findByDefaultNamespaceTrue()
+                ?: throw NotFoundException("Default namespace was not found")
         } else {
-            featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, key)
+            namespaceRepository.findByKey(namespaceKey)
+                ?: throw NotFoundException("Namespace '$namespaceKey' was not found")
         }
+
+    private fun requireActiveNamespace(namespaceKey: String?): Namespace =
+        requireNamespace(namespaceKey).also {
+            if (!it.active) throw NotFoundException("Namespace '${namespaceKey ?: it.key}' was not found")
+        }
+
+    private fun requireFeature(
+        namespaceId: UUID,
+        key: String,
+        group: String?,
+    ): Feature {
+        val groupId = group?.let { requireGroup(namespaceId, it).id!! }
+        val feature =
+            if (groupId == null) {
+                featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, key)
+            } else {
+                featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, key)
+            }
         return feature ?: throw NotFoundException("Feature '${featureName(group, key)}' was not found")
     }
 
@@ -456,28 +539,39 @@ class FeatureToggleService(
         return normalized
     }
 
-    private fun featureName(group: String?, key: String) = group?.let { "$it/$key" } ?: key
+    private fun featureName(
+        group: String?,
+        key: String,
+    ) = group?.let { "$it/$key" } ?: key
 
-    private fun requireGroup(namespaceId: UUID, key: String): FeatureGroup =
+    private fun requireGroup(
+        namespaceId: UUID,
+        key: String,
+    ): FeatureGroup =
         groupRepository.findByNamespaceIdAndKey(namespaceId, key)
             ?: throw NotFoundException("Group '$key' was not found")
 
-    private fun requireVersion(version: Long?, requested: Long?) {
+    private fun requireVersion(
+        version: Long?,
+        requested: Long?,
+    ) {
         if (requested == null) throw validation("version", "must not be null")
         if (version != requested) {
             throw ConflictException("Resource was changed by another request; current version is $version")
         }
     }
 
-    private fun groupKeyFor(feature: Feature): String? = feature.groupId?.let {
-        groupRepository.findById(it).orElse(null)?.key
-    }
+    private fun groupKeyFor(feature: Feature): String? =
+        feature.groupId?.let {
+            groupRepository.findById(it).orElse(null)?.key
+        }
 
-    private fun optionsFor(feature: Feature): List<String> = if (feature.type == FeatureType.ENUM) {
-        optionRepository.findAllByFeatureIdOrderBySortOrder(feature.id!!).map { it.value }
-    } else {
-        emptyList()
-    }
+    private fun optionsFor(feature: Feature): List<String> =
+        if (feature.type == FeatureType.ENUM) {
+            optionRepository.findAllByFeatureIdOrderBySortOrder(feature.id!!).map { it.value }
+        } else {
+            emptyList()
+        }
 
     private fun normalizeQuery(query: String?): String? {
         val normalized = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
@@ -487,16 +581,20 @@ class FeatureToggleService(
 
     private fun Namespace.toResponse() = NamespaceResponse(id!!, key, displayName, active, createdAt, updatedAt, defaultNamespace)
 
-    private fun FeatureGroup.toResponse() = FeatureGroupResponse(
-        id = id!!,
-        key = key,
-        displayName = displayName,
-        version = version ?: 0,
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-    )
+    private fun FeatureGroup.toResponse() =
+        FeatureGroupResponse(
+            id = id!!,
+            key = key,
+            displayName = displayName,
+            version = version ?: 0,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+        )
 
-    private fun Feature.toPublicResponse(group: String?, options: List<String>) = FeatureResponse(
+    private fun Feature.toPublicResponse(
+        group: String?,
+        options: List<String>,
+    ) = FeatureResponse(
         group = group,
         key = key,
         type = type,
@@ -505,7 +603,10 @@ class FeatureToggleService(
         version = version ?: 0,
     )
 
-    private fun Feature.toAdminResponse(group: String?, options: List<String>) = AdminFeatureResponse(
+    private fun Feature.toAdminResponse(
+        group: String?,
+        options: List<String>,
+    ) = AdminFeatureResponse(
         group = group,
         key = key,
         type = type,
@@ -517,6 +618,8 @@ class FeatureToggleService(
         updatedAt = updatedAt,
     )
 
-    private fun validation(field: String, message: String) =
-        DomainValidationException("Request validation failed", listOf(field to message))
+    private fun validation(
+        field: String,
+        message: String,
+    ) = DomainValidationException("Request validation failed", listOf(field to message))
 }

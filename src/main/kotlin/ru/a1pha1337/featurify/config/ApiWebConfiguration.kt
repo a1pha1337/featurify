@@ -12,9 +12,17 @@ import tools.jackson.databind.ObjectMapper
 class ApiWebConfiguration {
     @Bean
     fun apiNotFoundHandlerMapping(mapper: ObjectMapper): SimpleUrlHandlerMapping {
-        val handler = HttpRequestHandler { request, response ->
-            ApiProblems.write(mapper, request, response, HttpStatus.NOT_FOUND, "NOT_FOUND", "Resource was not found")
-        }
+        val handler =
+            HttpRequestHandler { request, response ->
+                ApiProblems.write(
+                    mapper,
+                    request,
+                    response,
+                    HttpStatus.NOT_FOUND,
+                    "NOT_FOUND",
+                    "Resource was not found",
+                )
+            }
         // After annotated REST controllers (order 0), before Vaadin's catch-all mapping.
         // MVC still handles method/media-type errors for existing endpoints itself.
         return SimpleUrlHandlerMapping(mapOf("/api/**" to handler), 1)

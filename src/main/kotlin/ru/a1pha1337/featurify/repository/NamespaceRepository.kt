@@ -6,7 +6,8 @@ import java.util.UUID
 
 interface NamespaceRepository : CrudRepository<Namespace, UUID> {
     fun findByKey(key: String): Namespace?
-    fun findByDefaultNamespaceTrue(): Namespace?
-    fun findAllByOrderByKey(): List<Namespace>
 
+    fun findByDefaultNamespaceTrue(): Namespace?
+
+    fun findAllByOrderByKey(): List<Namespace>
 }

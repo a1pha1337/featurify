@@ -1,6 +1,10 @@
 package ru.a1pha1337.featurify.service
 
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.springframework.beans.factory.annotation.Autowired
@@ -11,7 +15,13 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import ru.a1pha1337.featurify.config.TimeConfiguration
 import ru.a1pha1337.featurify.domain.FeatureType
-import ru.a1pha1337.featurify.dto.*
+import ru.a1pha1337.featurify.dto.AdminFeatureResponse
+import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
+import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
+import ru.a1pha1337.featurify.dto.CreateFeatureRequest
+import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
+import ru.a1pha1337.featurify.dto.MoveFeatureRequest
+import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.security.ActorProvider
 import java.util.UUID
 
@@ -39,21 +49,30 @@ class FeatureGroupDatabaseTests {
         val source = service.createGroup(namespace.key, CreateFeatureGroupRequest("source", "Source"))
         val target = service.createGroup(namespace.key, CreateFeatureGroupRequest("target", "Target"))
         assertEquals(2, service.listGroups(namespace.key).size)
-        val feature = service.createFeature(namespace.key, CreateFeatureRequest(
-            key = "checkout.enabled", type = FeatureType.BOOLEAN, group = source.key, booleanValue = true,
-        ))
+        val feature =
+            service.createFeature(
+                namespace.key,
+                CreateFeatureRequest(
+                    key = "checkout.enabled",
+                    type = FeatureType.BOOLEAN,
+                    group = source.key,
+                    booleanValue = true,
+                ),
+            )
         val page = PageRequest.of(0, 20)
         assertEquals(1, service.listForAdmin(namespace.key, page, null, source.key).totalElements)
         assertEquals(0, service.listForAdmin(namespace.key, page, null, target.key).totalElements)
 
-        val moved = service.moveFeature(namespace.key, feature.key, source.key, MoveFeatureRequest(feature.version, target.key))
+        val moved =
+            service.moveFeature(namespace.key, feature.key, source.key, MoveFeatureRequest(feature.version, target.key))
         assertEquals(target.key, moved.group)
         assertTrue(moved.version > feature.version)
         assertEquals(0, service.listForAdmin(namespace.key, page, null, source.key).totalElements)
         assertEquals(1, service.listForAdmin(namespace.key, page, "checkout", target.key).totalElements)
         assertEquals(0, service.listForAdmin(namespace.key, page, null, globalOnly = true).totalElements)
 
-        val global = service.moveFeature(namespace.key, feature.key, target.key, MoveFeatureRequest(moved.version, null))
+        val global =
+            service.moveFeature(namespace.key, feature.key, target.key, MoveFeatureRequest(moved.version, null))
         assertNull(global.group)
         assertTrue(global.version > moved.version)
         assertEquals(1, service.listForAdmin(namespace.key, page, null, globalOnly = true).totalElements)
@@ -63,33 +82,63 @@ class FeatureGroupDatabaseTests {
 
     @Test
     fun `hard deletes cascade through features options and history and allow key reuse`() {
-        org.mockito.Mockito.`when`(actor.currentUsername()).thenReturn("database-test")
+        org.mockito.Mockito
+            .`when`(actor.currentUsername())
+            .thenReturn("database-test")
         val namespace = service.createNamespace(CreateNamespaceRequest("test-${UUID.randomUUID()}", "Delete test"))
         val other = service.createNamespace(CreateNamespaceRequest("test-${UUID.randomUUID()}", "Other namespace"))
         val group = service.createGroup(namespace.key, CreateFeatureGroupRequest("group", "Group"))
         val otherGroup = service.createGroup(other.key, CreateFeatureGroupRequest("group", "Group"))
-        fun create(key: String, scope: String?, namespaceKey: String = namespace.key): AdminFeatureResponse {
-            val feature = service.createFeature(namespaceKey, CreateFeatureRequest(
-                key = key, type = FeatureType.ENUM, group = scope, enumValue = "a", enumOptions = listOf("a", "b"),
-            ))
+
+        fun create(
+            key: String,
+            scope: String?,
+            namespaceKey: String = namespace.key,
+        ): AdminFeatureResponse {
+            val feature =
+                service.createFeature(
+                    namespaceKey,
+                    CreateFeatureRequest(
+                        key = key,
+                        type = FeatureType.ENUM,
+                        group = scope,
+                        enumValue = "a",
+                        enumOptions = listOf("a", "b"),
+                    ),
+                )
             return service.patchFeature(namespaceKey, key, scope, PatchFeatureRequest(feature.version, enumValue = "b"))
         }
+
         fun count(table: String) = jdbc.queryForObject("SELECT count(*) FROM $table WHERE namespace_id = ?", Long::class.java, namespace.id)
-        fun featureId(feature: AdminFeatureResponse) = jdbc.queryForObject(
-            "SELECT id FROM feature WHERE namespace_id = ? AND key = ?", UUID::class.java, namespace.id, feature.key,
-        )!!
+
+        fun featureId(feature: AdminFeatureResponse) =
+            jdbc.queryForObject(
+                "SELECT id FROM feature WHERE namespace_id = ? AND key = ?",
+                UUID::class.java,
+                namespace.id,
+                feature.key,
+            )!!
+
         fun assertDependentsGone(id: UUID) {
             for (table in listOf("feature_enum_option", "feature_audit_log")) {
-                assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM $table WHERE feature_id = ?", Long::class.java, id))
+                assertEquals(
+                    0L,
+                    jdbc.queryForObject("SELECT count(*) FROM $table WHERE feature_id = ?", Long::class.java, id),
+                )
             }
         }
+
         val single = create("single", null)
         val singleId = featureId(single)
         assertEquals(1, service.history(namespace.key, single.key, null).size)
         service.deleteFeature(namespace.key, single.key, null, single.version)
         assertDependentsGone(singleId)
         assertThrows(NotFoundException::class.java) { service.getFeature(namespace.key, single.key, null) }
-        val recreated = service.createFeature(namespace.key, CreateFeatureRequest(key = single.key, type = FeatureType.BOOLEAN, booleanValue = true))
+        val recreated =
+            service.createFeature(
+                namespace.key,
+                CreateFeatureRequest(key = single.key, type = FeatureType.BOOLEAN, booleanValue = true),
+            )
         assertTrue(service.history(namespace.key, recreated.key, null).isEmpty())
         val grouped = create("grouped", group.key)
         val groupedId = featureId(grouped)
@@ -121,7 +170,12 @@ class FeatureGroupDatabaseTests {
         assertEquals(2, accessTokens.list(namespace.key).size)
         assertEquals(namespace.id, accessTokens.authenticate(first.token))
         assertEquals(namespace.id, accessTokens.authenticate(second.token))
-        val hash = jdbc.queryForObject("SELECT token_hash FROM namespace_access_token WHERE id = ?", String::class.java, first.id)!!
+        val hash =
+            jdbc.queryForObject(
+                "SELECT token_hash FROM namespace_access_token WHERE id = ?",
+                String::class.java,
+                first.id,
+            )!!
         assertNotEquals(first.token, hash)
         assertEquals(60, hash.length)
         accessTokens.revoke(namespace.key, first.id)
@@ -129,7 +183,14 @@ class FeatureGroupDatabaseTests {
         assertEquals(namespace.id, accessTokens.authenticate(second.token))
         service.deleteNamespace(namespace.key)
         assertNull(accessTokens.authenticate(second.token))
-        assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM namespace_access_token WHERE namespace_id = ?", Long::class.java, namespace.id))
+        assertEquals(
+            0L,
+            jdbc.queryForObject(
+                "SELECT count(*) FROM namespace_access_token WHERE namespace_id = ?",
+                Long::class.java,
+                namespace.id,
+            ),
+        )
     }
 
     @Test
