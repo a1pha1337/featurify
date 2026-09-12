@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
-import ru.a1pha1337.featurify.domain.FeatureStatus
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.dto.*
 import ru.a1pha1337.featurify.service.FeatureToggleService
@@ -29,11 +28,11 @@ class MainViewTests {
     private val ui = UI()
     private val now = Instant.parse("2026-09-11T12:00:00Z")
     private val tenant = TenantResponse(UUID.randomUUID(), "blue", "Blue", true, now, now, true)
-    private val source = FeatureGroupResponse(UUID.randomUUID(), "source", "Source", FeatureStatus.ACTIVE, 1, now, now)
+    private val source = FeatureGroupResponse(UUID.randomUUID(), "source", "Source", 1, now, now)
     private val target = source.copy(id = UUID.randomUUID(), key = "target", displayName = "Target")
     private val groups = mutableListOf(source, target)
     private var feature = AdminFeatureResponse("source", "checkout.enabled", FeatureType.BOOLEAN, true,
-        null, "Checkout flag", FeatureStatus.ACTIVE, 7, now, now)
+        null, "Checkout flag", 7, now, now)
     private lateinit var view: MainView
 
     @BeforeEach
@@ -49,11 +48,11 @@ class MainViewTests {
         // Default answer avoids nullable Mockito matchers crossing Kotlin's non-null parameters.
         doAnswer { invocation ->
             val page = invocation.getArgument<Pageable>(1)
-            val group = invocation.getArgument<String?>(4)
-            val global = invocation.getArgument<Boolean>(5)
+            val group = invocation.getArgument<String?>(3)
+            val global = invocation.getArgument<Boolean>(4)
             val visible = if (global) feature.group == null else group == null || feature.group == group
             PageImpl(if (visible) listOf(feature) else emptyList(), page, if (visible) 1 else 0)
-        }.`when`(service).listForAdmin(eq("blue"), anyPage(), anyStatuses(), nullableQuery(), nullableQuery(), anyBoolean())
+        }.`when`(service).listForAdmin(eq("blue"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean())
         view = MainView(service, factory.validator)
         ui.add(view)
     }
@@ -63,6 +62,16 @@ class MainViewTests {
         UI.setCurrent(null)
         VaadinSession.setCurrent(null)
         factory.close()
+    }
+
+    @Test
+    fun `tenant creation offers no default tenant control`() {
+        button(view, "New tenant").click()
+        val dialog = dialog()
+
+        assertTrue(components(dialog).filterIsInstance<com.vaadin.flow.component.checkbox.Checkbox>().isEmpty())
+        assertEquals(setOf("Tenant key", "Display name"),
+            components(dialog).filterIsInstance<TextField>().map { it.label }.toSet())
     }
 
     @Test
@@ -111,8 +120,7 @@ class MainViewTests {
     }
 
     @Test
-    fun `move to Global is explicit and archived targets are absent`() {
-        groups.add(source.copy(id = UUID.randomUUID(), key = "archived", status = FeatureStatus.ARCHIVED))
+    fun `move to Global is explicit`() {
         grid().select(feature)
         `when`(service.moveFeature("blue", feature.key, "source", MoveFeatureRequest(7, null))).thenAnswer {
             feature = feature.copy(group = null, version = 8)
@@ -122,7 +130,7 @@ class MainViewTests {
         val dialog = dialog()
         val picker = combo(dialog, "Target group")
         assertEquals(3, picker.listDataView.itemCount)
-        choose(picker, "Global · no group")
+        choose(picker, "Global")
 
         button(dialog, "Move feature").click()
 
@@ -134,7 +142,7 @@ class MainViewTests {
     fun `switching tenant clears selection and keeps group creation enabled`() {
         val other = tenant.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultTenant = false)
         `when`(service.listGroups("other")).thenReturn(emptyList())
-        `when`(service.listForAdmin(eq("other"), anyPage(), anyStatuses(), nullableQuery(), nullableQuery(), anyBoolean()))
+        `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
             .thenReturn(PageImpl(emptyList()))
         grid().select(feature)
         val tenants = combo(view, "Tenant")
@@ -162,6 +170,46 @@ class MainViewTests {
         assertEquals("Target (target)", selectedLabel(combo(dialog, "Target group")))
     }
 
+    @Test
+    fun `feature deletion requires confirmation and uses selected version`() {
+        grid().select(feature)
+        button(view, "Delete").click()
+        val cancelled = dialog()
+        button(cancelled, "Cancel").click()
+        verify(service, never()).deleteFeature("blue", feature.key, feature.group, feature.version)
+        button(view, "Delete").click()
+        val confirmed = dialog()
+        button(confirmed, "Delete").click()
+        verify(service).deleteFeature("blue", feature.key, feature.group, feature.version)
+        assertFalse(confirmed.isOpened)
+        assertFalse(button(view, "Delete").isEnabled)
+    }
+
+    @Test
+    fun `default tenant deletion is disabled`() {
+        assertFalse(button(view, "Delete tenant").isEnabled)
+    }
+
+    @Test
+    fun `tenant deletion confirms cascade and selects default afterwards`() {
+        val other = tenant.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultTenant = false)
+        `when`(service.listGroups("other")).thenReturn(emptyList())
+        `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
+            .thenReturn(PageImpl(emptyList()))
+        val tenants = combo(view, "Tenant")
+        tenants.setItems(listOf(tenant, other))
+        tenants.value = other
+        assertTrue(button(view, "Delete tenant").isEnabled)
+        button(view, "Delete tenant").click()
+        val confirmation = dialog()
+        verify(service, never()).deleteTenant("other")
+        button(confirmation, "Delete tenant").click()
+        verify(service).deleteTenant("other")
+        assertFalse(confirmation.isOpened)
+        assertEquals(tenant, tenants.value)
+        assertFalse(button(view, "Delete tenant").isEnabled)
+    }
+
     private fun components(root: Component): List<Component> =
         listOf(root) + root.element.children.toList().flatMap { element ->
             element.component.map { components(it) }.orElse(emptyList())
@@ -187,7 +235,6 @@ class MainViewTests {
         combo.value = combo.listDataView.items.toList().single { combo.itemLabelGenerator.apply(it) == label }
     }
     private fun anyPage(): Pageable = any(Pageable::class.java) ?: org.springframework.data.domain.PageRequest.of(0, 20)
-    private fun anyStatuses(): Set<FeatureStatus> = anySet<FeatureStatus>()
     private fun nullableQuery(): String? = nullable(String::class.java)
     private fun anyRequest(): CreateFeatureGroupRequest = any(CreateFeatureGroupRequest::class.java) ?: CreateFeatureGroupRequest("", "")
 }

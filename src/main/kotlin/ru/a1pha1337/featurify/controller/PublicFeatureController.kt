@@ -20,14 +20,14 @@ class PublicFeatureController(private val service: FeatureToggleService) {
         @RequestParam(required = false) tenant: String?,
         @PageableDefault(size = 20, sort = ["key"]) pageable: Pageable,
         @RequestParam(required = false) query: String?,
-    ): Page<FeatureResponse> = service.listActive(tenant, pageable, query)
+    ): Page<FeatureResponse> = service.listFeatures(tenant, pageable, query)
 
     @GetMapping("/features/{key}")
     fun get(
         @RequestParam(required = false) tenant: String?,
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
-    ): FeatureResponse = service.getActive(tenant, key, group)
+    ): FeatureResponse = service.getFeature(tenant, key, group)
 
     @GetMapping("/features:resolve")
     fun resolve(

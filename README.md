@@ -6,11 +6,11 @@
 
 - типы `BOOLEAN` и `ENUM`;
 - независимые ключи и значения в каждом tenant'е;
-- публичный read-only REST API только для активных фич;
+- публичный read-only REST API;
 - административный REST API и Vaadin UI;
 - optimistic locking по обязательному полю `version`;
-- архивирование без физического удаления;
-- аудит смены значения и архивирования с `preferred_username` из Keycloak;
+- полное удаление фич, групп и tenant с каскадным удалением вложенных данных;
+- аудит смены значения с `preferred_username` из Keycloak;
 - OAuth2 Login для UI и JWT Bearer authentication для admin API;
 - Flyway-схема с уникальностями, check constraints и DB-триггером неизменяемости типа;
 - health probes и graceful shutdown.
@@ -38,22 +38,28 @@ docker compose ps
 
 После изменения исходников пересоберите приложение: `docker compose up --build -d app`.
 Иначе на `localhost:8080` продолжит работать предыдущая версия UI.
-Миграция `V2__create_feature_groups.sql` переводит прежние `feature.group_key` в отдельные
-группы, сохраняя фичи, статусы и привязку к tenant. `V1` восстановлена в исходном виде
-(checksum `1955605926`), который применялся до появления таблицы групп; существующий volume
-PostgreSQL удалять не нужно. Если база уже была создана с переписанной `V1` из промежуточной
-версии, сначала проверьте её схему и историю Flyway: автоматический `repair` для неё не выполняется.
+Системный tenant `default` с названием `Default` создаётся миграцией и всегда остаётся
+единственным default tenant. Создание других tenant не меняет его; параметра
+`defaultTenant` в запросе создания и переключателя в UI нет.
+
+Для MVP вся схема, включая группы фич, создаётся одной миграцией
+`V1__create_feature_toggle_schema.sql`. Она предназначена для новой базы.
+База с ранее применёнными версиями `V1` / `V2` потребует пересоздания перед запуском
+обновлённой сборки; при необходимости предварительно сохраните данные.
 
 ### Работа с группами в UI
 
 - `New group` создаёт пустую группу и сразу выбирает её в фильтре.
-- Фильтр `Group` показывает все группы, только `Global` или конкретную группу, включая архивные.
+- Фильтр `Group` показывает все группы, только `Global` или конкретную группу.
 - Для переноса выберите строку фичи → `Move to group` → целевую группу → `Move feature`.
-  `Global · no group` переносит фичу из группы в глобальную область; текущая и архивные
-  группы недоступны для переноса как новое назначение.
-- `Manage groups` показывает группы и позволяет архивировать группу вместе с её активными фичами.
-- Поиск, группа и статусы применяются совместно до пагинации. `Reset filters` возвращает
-  все активные фичи tenant. Ошибки ввода сохраняют открытой форму для исправления.
+  `Global` переносит фичу из группы в глобальную область; текущую группу нельзя выбрать повторно.
+- `Delete` полностью удаляет выбранную фичу, её enum-опции и историю.
+- `Manage groups` позволяет удалить группу вместе со всеми её фичами.
+- `Delete tenant` удаляет tenant, все его группы и фичи, включая `Global`.
+  Для системного `default` действие недоступно; удаление также запрещено сервисом и DB-триггером.
+- Удаление требует подтверждения в UI и необратимо.
+- Поиск и группа применяются совместно до пагинации. `Reset filters` возвращает
+  все фичи tenant. Ошибки ввода сохраняют открытой форму для исправления.
 
 Realm `featurify`, confidential client и локальный пользователь импортируются автоматически из
 `docker/keycloak/featurify-realm.json`. При первом запуске PostgreSQL также создаёт отдельную базу
@@ -97,20 +103,21 @@ Admin endpoints принимают Keycloak Bearer token либо browser OAuth2
 ```text
 POST  /api/v1/tenants
 GET   /api/v1/tenants
+DELETE /api/v1/tenants/{tenantKey}
 POST  /api/v1/groups?tenant={tenantKey}
 GET   /api/v1/groups?tenant={tenantKey}
-POST  /api/v1/groups/{groupKey}/archive?tenant={tenantKey}
+DELETE /api/v1/groups/{groupKey}?tenant={tenantKey}
 POST  /api/v1/features?tenant={tenantKey}
 PATCH /api/v1/features/{key}?tenant={tenantKey}&group={groupKey}
 PATCH /api/v1/features/{key}/group?tenant={tenantKey}&group={currentGroupKey}
-POST  /api/v1/features/{key}/archive?tenant={tenantKey}&group={groupKey}
+DELETE /api/v1/features/{key}?tenant={tenantKey}&group={groupKey}
 GET   /api/v1/features/{key}/history?tenant={tenantKey}&group={groupKey}
 ```
 
 Примеры тел запросов:
 
 ```json
-{"key":"blue","displayName":"Blue environment","defaultTenant":false}
+{"key":"blue","displayName":"Blue environment"}
 ```
 
 ```json
@@ -134,8 +141,11 @@ GET   /api/v1/features/{key}/history?tenant={tenantKey}&group={groupKey}
 
 Группу можно создать телом `{"key":"checkout","displayName":"Checkout"}`. Перенос фичи
 выполняется телом `{"version":0,"targetGroup":"checkout"}`; `targetGroup: null` переносит
-фичу в глобальную область tenant. При архивировании группы она и все её активные фичи
-архивируются одной транзакцией и попадают в аудит.
+фичу в глобальную область tenant. DELETE фичи и группы требует тело `{"version":1}`
+с текущей версией; DELETE tenant не требует тела. Успешное удаление возвращает `204 No Content`.
+Каскады БД удаляют вложенные фичи, enum-опции и историю одной транзакцией.
+Удалённые ключи можно использовать повторно. DELETE системного `default` возвращает `409 Conflict`.
+DB-триггеры также запрещают его изменение, прямой DELETE и TRUNCATE таблицы tenant.
 
 Все REST-ошибки имеют единый вид:
 
@@ -147,7 +157,7 @@ GET   /api/v1/features/{key}/history?tenant={tenantKey}&group={groupKey}
 }
 ```
 
-Устаревшая версия возвращает `409 Conflict`; неизвестная или архивная фича в публичном API — `404 Not Found`.
+Устаревшая версия возвращает `409 Conflict`; неизвестная или удалённая фича в публичном API — `404 Not Found`.
 Список фич возвращается как Spring Data `Page`: элементы находятся в `content`, рядом передаются метаданные страницы и общее количество элементов.
 Номер страницы начинается с нуля, размер страницы по умолчанию равен 20; сортировка по умолчанию выполняется по `key`.
 Параметр `tenant` необязателен во всех feature endpoints: без него используется default tenant.

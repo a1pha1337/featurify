@@ -22,7 +22,6 @@ import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureAuditLog
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
-import ru.a1pha1337.featurify.domain.FeatureStatus
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.Tenant
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
@@ -48,14 +47,14 @@ class FeatureToggleService(
     @Transactional
     fun createTenant(request: CreateTenantRequest): TenantResponse {
         val now = clock.instant()
-        if (request.defaultTenant) tenantRepository.clearDefault(now)
+        if (request.key == "default") throw validation("key", "is reserved for the system Default tenant")
         return tenantRepository.save(
             Tenant(
                 key = request.key,
                 displayName = request.displayName,
                 createdAt = now,
                 updatedAt = now,
-                defaultTenant = request.defaultTenant,
+                defaultTenant = false,
             ),
         ).toResponse()
     }
@@ -71,7 +70,7 @@ class FeatureToggleService(
             throw validation("displayName", "must contain between 1 and 255 characters")
         }
         if (groupRepository.findByTenantIdAndKey(tenant.id!!, key) != null) {
-            throw ConflictException("Group '$key' already exists in this tenant, possibly in the archive. Choose another key.")
+            throw ConflictException("Group '$key' already exists in this tenant. Choose another key.")
         }
         val now = clock.instant()
         return groupRepository.save(
@@ -92,23 +91,24 @@ class FeatureToggleService(
     }
 
     @Transactional
-    fun archiveGroup(tenantKey: String?, groupKey: String, version: Long?): FeatureGroupResponse {
+    fun deleteTenant(tenantKey: String) {
+        val tenant = requireTenant(tenantKey)
+        if (tenant.defaultTenant || tenant.key == "default") {
+            throw ConflictException("The system Default tenant cannot be deleted")
+        }
+        tenantRepository.delete(tenant)
+    }
+
+    @Transactional
+    fun deleteGroup(tenantKey: String?, groupKey: String, version: Long?) {
         val tenant = requireTenant(tenantKey)
         val group = requireGroup(tenant.id!!, groupKey)
         requireVersion(group.version, version)
-        if (group.status == FeatureStatus.ARCHIVED) {
-            throw ConflictException("Group '$groupKey' is already archived")
+        try {
+            groupRepository.delete(group)
+        } catch (exception: OptimisticLockingFailureException) {
+            throw ConflictException("Group was changed by another request")
         }
-        val archived = saveGroupWithConflict(group.copy(status = FeatureStatus.ARCHIVED, updatedAt = clock.instant()))
-        featureRepository.findAllByTenantIdAndGroupIdAndStatus(
-            tenant.id,
-            group.id!!,
-            FeatureStatus.ACTIVE,
-        ).forEach { feature ->
-            val saved = saveWithConflict(feature.copy(status = FeatureStatus.ARCHIVED, updatedAt = clock.instant()))
-            audit(tenant, saved, AuditOperation.ARCHIVED, FeatureStatus.ACTIVE.name, FeatureStatus.ARCHIVED.name)
-        }
-        return archived.toResponse()
     }
 
     @Transactional
@@ -122,11 +122,8 @@ class FeatureToggleService(
         val currentGroupKey = normalizeGroup(currentGroup)
         val current = requireFeature(tenant.id!!, key, currentGroupKey)
         requireVersion(current, request.version)
-        if (current.status == FeatureStatus.ARCHIVED) {
-            throw ConflictException("Archived feature '${featureName(currentGroupKey, key)}' cannot be moved")
-        }
         val targetGroupKey = normalizeGroup(request.targetGroup)
-        val targetGroup = targetGroupKey?.let { requireActiveGroup(tenant.id!!, it) }
+        val targetGroup = targetGroupKey?.let { requireGroup(tenant.id!!, it) }
         if (targetGroup?.id == current.groupId) return current.toAdminResponse(targetGroupKey, optionsFor(current))
         val existing = if (targetGroup == null) {
             featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenant.id, key)
@@ -134,7 +131,7 @@ class FeatureToggleService(
             featureRepository.findByTenantIdAndGroupIdAndKey(tenant.id, targetGroup.id!!, key)
         }
         if (existing != null) {
-            throw ConflictException("Feature '$key' already exists in ${targetGroupKey ?: "Global"}, possibly in the archive. Choose another group.")
+            throw ConflictException("Feature '$key' already exists in ${targetGroupKey ?: "Global"}. Choose another group.")
         }
         val saved = saveWithConflict(current.copy(groupId = targetGroup?.id, updatedAt = clock.instant()))
         return saved.toAdminResponse(targetGroupKey, optionsFor(saved))
@@ -144,7 +141,7 @@ class FeatureToggleService(
     fun createFeature(tenantKey: String?, request: CreateFeatureRequest): AdminFeatureResponse {
         val tenant = requireTenant(tenantKey)
         val type = request.type ?: throw validation("type", "must not be null")
-        val group = normalizeGroup(request.group)?.let { requireActiveGroup(tenant.id!!, it) }
+        val group = normalizeGroup(request.group)?.let { requireGroup(tenant.id!!, it) }
         validateCreation(request, type)
         val now = clock.instant()
         val saved = featureRepository.save(
@@ -172,15 +169,14 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun listActive(tenantKey: String?, pageable: Pageable, query: String?): Page<FeatureResponse> {
+    fun listFeatures(tenantKey: String?, pageable: Pageable, query: String?): Page<FeatureResponse> {
         val tenant = requireActiveTenant(tenantKey)
         val normalizedQuery = normalizeQuery(query)
         val features = if (normalizedQuery == null) {
-            featureRepository.findAllByTenantIdAndStatus(tenant.id!!, FeatureStatus.ACTIVE, pageable)
+            featureRepository.findAllByTenantId(tenant.id!!, pageable)
         } else {
-            featureRepository.findAllByTenantIdAndStatusAndKeyContaining(
+            featureRepository.findAllByTenantIdAndKeyContaining(
                 tenant.id!!,
-                FeatureStatus.ACTIVE,
                 normalizedQuery,
                 pageable,
             )
@@ -189,9 +185,9 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun getActive(tenantKey: String?, key: String, group: String?): FeatureResponse {
+    fun getFeature(tenantKey: String?, key: String, group: String?): FeatureResponse {
         val tenant = requireActiveTenant(tenantKey)
-        val feature = requireActiveFeature(tenant.id!!, key, normalizeGroup(group))
+        val feature = requireFeature(tenant.id!!, key, normalizeGroup(group))
         return feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
     }
 
@@ -204,7 +200,7 @@ class FeatureToggleService(
         val groupKey = normalizeGroup(group)
         val resolved = LinkedHashMap<String, FeatureResponse>()
         keys.distinct().forEach { key ->
-            val feature = requireActiveFeature(tenant.id!!, key, groupKey)
+            val feature = requireFeature(tenant.id!!, key, groupKey)
             resolved[key] = feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
         }
         return ResolveResponse(resolved)
@@ -214,37 +210,34 @@ class FeatureToggleService(
     fun listForAdmin(
         tenantKey: String?,
         pageable: Pageable,
-        statuses: Set<FeatureStatus>,
         query: String?,
         group: String? = null,
         globalOnly: Boolean = false,
     ): Page<AdminFeatureResponse> {
         val tenant = requireTenant(tenantKey)
-        if (statuses.isEmpty()) return Page.empty(pageable)
         val normalizedQuery = normalizeQuery(query)
         val groupId = normalizeGroup(group)?.let { requireGroup(tenant.id!!, it).id!! }
         val features = if (groupId != null) {
             if (normalizedQuery == null) {
-                featureRepository.findAllByTenantIdAndGroupIdAndStatusIn(tenant.id!!, groupId, statuses, pageable)
+                featureRepository.findAllByTenantIdAndGroupId(tenant.id!!, groupId, pageable)
             } else {
-                featureRepository.findAllByTenantIdAndGroupIdAndStatusInAndKeyContaining(
-                    tenant.id!!, groupId, statuses, normalizedQuery, pageable,
+                featureRepository.findAllByTenantIdAndGroupIdAndKeyContaining(
+                    tenant.id!!, groupId, normalizedQuery, pageable,
                 )
             }
         } else if (globalOnly) {
             if (normalizedQuery == null) {
-                featureRepository.findAllByTenantIdAndGroupIdIsNullAndStatusIn(tenant.id!!, statuses, pageable)
+                featureRepository.findAllByTenantIdAndGroupIdIsNull(tenant.id!!, pageable)
             } else {
-                featureRepository.findAllByTenantIdAndGroupIdIsNullAndStatusInAndKeyContaining(
-                    tenant.id!!, statuses, normalizedQuery, pageable,
+                featureRepository.findAllByTenantIdAndGroupIdIsNullAndKeyContaining(
+                    tenant.id!!, normalizedQuery, pageable,
                 )
             }
         } else if (normalizedQuery == null) {
-            featureRepository.findAllByTenantIdAndStatusIn(tenant.id!!, statuses, pageable)
+            featureRepository.findAllByTenantId(tenant.id!!, pageable)
         } else {
-            featureRepository.findAllByTenantIdAndStatusInAndKeyContaining(
+            featureRepository.findAllByTenantIdAndKeyContaining(
                 tenant.id!!,
-                statuses,
                 normalizedQuery,
                 pageable,
             )
@@ -263,9 +256,6 @@ class FeatureToggleService(
         val groupKey = normalizeGroup(group)
         val current = requireFeature(tenant.id!!, key, groupKey)
         requireVersion(current, request.version)
-        if (current.status == FeatureStatus.ARCHIVED) {
-            throw ConflictException("Archived feature '${featureName(groupKey, key)}' cannot be changed")
-        }
         validatePatch(current, request)
 
         val newBoolean = if (current.type == FeatureType.BOOLEAN) request.booleanValue ?: current.booleanValue else null
@@ -289,19 +279,15 @@ class FeatureToggleService(
     }
 
     @Transactional
-    fun archive(tenantKey: String?, key: String, group: String?, version: Long?): AdminFeatureResponse {
+    fun deleteFeature(tenantKey: String?, key: String, group: String?, version: Long?) {
         val tenant = requireTenant(tenantKey)
-        val groupKey = normalizeGroup(group)
-        val current = requireFeature(tenant.id!!, key, groupKey)
+        val current = requireFeature(tenant.id!!, key, normalizeGroup(group))
         requireVersion(current, version)
-        if (current.status == FeatureStatus.ARCHIVED) {
-            throw ConflictException("Feature '${featureName(groupKey, key)}' is already archived")
+        try {
+            featureRepository.delete(current)
+        } catch (exception: OptimisticLockingFailureException) {
+            throw ConflictException("Feature was changed by another request")
         }
-        val saved = saveWithConflict(
-            current.copy(status = FeatureStatus.ARCHIVED, updatedAt = clock.instant()),
-        )
-        audit(tenant, saved, AuditOperation.ARCHIVED, FeatureStatus.ACTIVE.name, FeatureStatus.ARCHIVED.name)
-        return saved.toAdminResponse(groupKeyFor(saved), optionsFor(saved))
     }
 
     @Transactional(readOnly = true)
@@ -387,6 +373,7 @@ class FeatureToggleService(
         auditRepository.save(
             FeatureAuditLog(
                 tenantId = tenant.id!!,
+                featureId = feature.id!!,
                 tenantKey = tenant.key,
                 featureGroup = groupKeyFor(feature),
                 featureKey = feature.key,
@@ -421,13 +408,6 @@ class FeatureToggleService(
         return feature ?: throw NotFoundException("Feature '${featureName(group, key)}' was not found")
     }
 
-    private fun requireActiveFeature(tenantId: UUID, key: String, group: String?): Feature =
-        requireFeature(tenantId, key, group).also {
-            if (it.status != FeatureStatus.ACTIVE) {
-                throw NotFoundException("Feature '${featureName(group, key)}' was not found")
-            }
-        }
-
     private fun normalizeGroup(group: String?): String? {
         val normalized = group?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         if (normalized.length > 255 || !Regex(ValidationPatterns.FEATURE_GROUP).matches(normalized)) {
@@ -442,22 +422,11 @@ class FeatureToggleService(
         groupRepository.findByTenantIdAndKey(tenantId, key)
             ?: throw NotFoundException("Group '$key' was not found")
 
-    private fun requireActiveGroup(tenantId: UUID, key: String): FeatureGroup =
-        requireGroup(tenantId, key).also {
-            if (it.status != FeatureStatus.ACTIVE) throw ConflictException("Group '$key' is archived")
-        }
-
     private fun requireVersion(version: Long?, requested: Long?) {
         if (requested == null) throw validation("version", "must not be null")
         if (version != requested) {
             throw ConflictException("Resource was changed by another request; current version is $version")
         }
-    }
-
-    private fun saveGroupWithConflict(group: FeatureGroup): FeatureGroup = try {
-        groupRepository.save(group)
-    } catch (exception: OptimisticLockingFailureException) {
-        throw ConflictException("Group was changed by another request")
     }
 
     private fun groupKeyFor(feature: Feature): String? = feature.groupId?.let {
@@ -482,7 +451,6 @@ class FeatureToggleService(
         id = id!!,
         key = key,
         displayName = displayName,
-        status = status,
         version = version ?: 0,
         createdAt = createdAt,
         updatedAt = updatedAt,
@@ -504,7 +472,6 @@ class FeatureToggleService(
         value = if (type == FeatureType.BOOLEAN) booleanValue!! else enumValue!!,
         enumOptions = options.takeIf { type == FeatureType.ENUM },
         description = description,
-        status = status,
         version = version ?: 0,
         createdAt = createdAt,
         updatedAt = updatedAt,

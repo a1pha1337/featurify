@@ -12,7 +12,6 @@ data class FeatureGroup(
     val tenantId: UUID,
     val key: String,
     val displayName: String,
-    val status: FeatureStatus = FeatureStatus.ACTIVE,
     @Version val version: Long? = null,
     val createdAt: Instant,
     val updatedAt: Instant,

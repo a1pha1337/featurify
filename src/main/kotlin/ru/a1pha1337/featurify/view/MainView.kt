@@ -6,7 +6,6 @@ import com.vaadin.flow.component.button.Button
 import com.vaadin.flow.component.button.ButtonVariant
 import com.vaadin.flow.component.checkbox.Checkbox
 import com.vaadin.flow.component.combobox.ComboBox
-import com.vaadin.flow.component.combobox.MultiSelectComboBox
 import com.vaadin.flow.component.dialog.Dialog
 import com.vaadin.flow.component.grid.Grid
 import com.vaadin.flow.component.html.Div
@@ -41,7 +40,6 @@ import ru.a1pha1337.featurify.dto.FeatureGroupResponse
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.TenantResponse
-import ru.a1pha1337.featurify.domain.FeatureStatus
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.service.FeatureToggleService
 import java.time.ZoneOffset
@@ -57,11 +55,11 @@ class MainView(private val service: FeatureToggleService, private val validator:
     private val createGroupButton = Button("New group")
     private val editButton = Button("Edit")
     private val moveButton = Button("Move to group")
-    private val archiveButton = Button("Archive")
+    private val deleteButton = Button("Delete")
+    private val deleteTenantButton = Button("Delete tenant")
     private val groupsButton = Button("Manage groups")
     private val historyButton = Button("History")
     private val groupSelect = ComboBox<GroupChoice>("Group")
-    private val statusFilter = MultiSelectComboBox<FeatureStatus>("Statuses")
     private val keyFilter = TextField("Feature key")
     private val pagination = HorizontalLayout()
     private val resultSummary = Span()
@@ -70,7 +68,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
     private var updatingControls = false
     private data class GroupChoice(val key: String?, val label: String, val all: Boolean = false)
     private val allGroups = GroupChoice(null, "All groups", all = true)
-    private val globalGroup = GroupChoice(null, "Global · no group")
+    private val globalGroup = GroupChoice(null, "Global")
     private var currentPage = 0
     private var groups: List<FeatureGroupResponse> = emptyList()
 
@@ -90,7 +88,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
 
         val brand = Div(Span("F").apply { addClassName("brand-mark") }, H1("Featurify"))
             .apply { addClassName("brand") }
-        tenantSelect.setItemLabelGenerator { "${it.displayName}${if (it.defaultTenant) " · default" else ""}" }
+        tenantSelect.setItemLabelGenerator { if (it.defaultTenant) it.key else it.displayName }
         tenantSelect.isAllowCustomValue = false
         tenantSelect.addValueChangeListener {
             if (!updatingControls) runUiAction {
@@ -99,13 +97,9 @@ class MainView(private val service: FeatureToggleService, private val validator:
                 refreshFeatures()
             }
         }
-        val header = Div(brand, Div(tenantSelect, Button("New tenant") { openTenantDialog() })
+        val header = Div(brand, Div(tenantSelect, Button("New tenant") { openTenantDialog() }, deleteTenantButton)
             .apply { addClassName("tenant-controls") }).apply { addClassName("app-header") }
 
-        statusFilter.setItems(*FeatureStatus.entries.toTypedArray())
-        statusFilter.setItemLabelGenerator { statusLabel(it) }
-        statusFilter.setValue(setOf(FeatureStatus.ACTIVE))
-        statusFilter.addValueChangeListener { filtersChanged() }
         keyFilter.placeholder = "Search by key…"
         keyFilter.maxLength = 255
         keyFilter.helperText = "Enter at least 3 characters"
@@ -116,14 +110,16 @@ class MainView(private val service: FeatureToggleService, private val validator:
         groupSelect.setItemLabelGenerator { it.label }
         groupSelect.addValueChangeListener { filtersChanged() }
 
+        deleteTenantButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
+        deleteTenantButton.addClickListener { openDeleteTenantDialog() }
         createFeatureButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY)
         createFeatureButton.addClickListener { runUiAction { openCreateFeatureDialog() } }
         createGroupButton.addClickListener { openCreateGroupDialog() }
         groupsButton.addClickListener { runUiAction { openGroupsDialog() } }
         editButton.addClickListener { selected()?.let(::openEditDialog) }
         moveButton.addClickListener { selected()?.let { runUiAction { openMoveDialog(it) } } }
-        archiveButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
-        archiveButton.addClickListener { selected()?.let(::openArchiveDialog) }
+        deleteButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
+        deleteButton.addClickListener { selected()?.let(::openDeleteDialog) }
         historyButton.addClickListener { selected()?.let { runUiAction { openHistoryDialog(it) } } }
         updateSelection(null)
 
@@ -141,8 +137,6 @@ class MainView(private val service: FeatureToggleService, private val validator:
             } else feature.value.toString()
             Span(label).apply { addClassName("value-chip"); element.setAttribute("title", label) }
         }.setHeader("Value").setWidth("150px").setFlexGrow(1)
-        grid.addComponentColumn { statusBadge(it.status) }
-            .setHeader("Status").setWidth("120px").setFlexGrow(0)
         grid.setSizeFull()
         grid.addClassName("feature-grid")
         grid.asSingleSelect().addValueChangeListener { updateSelection(it.value) }
@@ -159,9 +153,9 @@ class MainView(private val service: FeatureToggleService, private val validator:
         val title = Div(H2("Features"), resultSummary).apply { addClassName("page-title") }
         val actions = Div(groupsButton, createGroupButton, createFeatureButton).apply { addClassName("page-actions") }
         val toolbar = Div(title, actions).apply { addClassName("page-toolbar") }
-        val filters = Div(keyFilter, groupSelect, statusFilter, Button("Reset filters") { resetFilters() })
+        val filters = Div(keyFilter, groupSelect, Button("Reset filters") { resetFilters() })
             .apply { addClassName("filters") }
-        val selection = Div(selectionSummary, Div(editButton, moveButton, historyButton, archiveButton)
+        val selection = Div(selectionSummary, Div(editButton, moveButton, historyButton, deleteButton)
             .apply { addClassName("selection-actions") }).apply { addClassName("selection-bar") }
         val table = VerticalLayout(selection, grid, emptyState, pagination).apply {
             addClassName("table-panel")
@@ -193,7 +187,6 @@ class MainView(private val service: FeatureToggleService, private val validator:
         try {
             keyFilter.clear()
             groupSelect.value = allGroups
-            statusFilter.setValue(setOf(FeatureStatus.ACTIVE))
         } finally {
             updatingControls = false
         }
@@ -201,10 +194,10 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun updateSelection(feature: AdminFeatureResponse?) {
-        val active = feature?.status == FeatureStatus.ACTIVE
-        editButton.isEnabled = active
-        moveButton.isEnabled = active
-        archiveButton.isEnabled = active
+        val selected = feature != null
+        editButton.isEnabled = selected
+        moveButton.isEnabled = selected
+        deleteButton.isEnabled = selected
         historyButton.isEnabled = feature != null
         selectionSummary.text = feature?.let { "Selected: ${featureName(it)}" } ?: "Select a feature to manage it"
     }
@@ -228,7 +221,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         val previous = groupSelect.value.takeIf { preserveSelection }
         groups = tenantSelect.value?.let { service.listGroups(it.key) } ?: emptyList()
         val choices = listOf(allGroups, globalGroup) + groups.map {
-            GroupChoice(it.key, "${it.displayName} (${it.key})${if (it.status == FeatureStatus.ARCHIVED) " · archived" else ""}")
+            GroupChoice(it.key, "${it.displayName} (${it.key})")
         }
         updatingControls = true
         try {
@@ -250,6 +243,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         grid.deselectAll()
         updateSelection(null)
         val tenant = tenantSelect.value
+        deleteTenantButton.isEnabled = tenant != null && !tenant.defaultTenant && tenant.key != "default"
         listOf(createFeatureButton, createGroupButton, groupsButton).forEach { it.isEnabled = tenant != null }
         groupSelect.isEnabled = tenant != null
         val query = keyFilter.value.trim()
@@ -264,7 +258,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
             return
         }
         val scope = groupSelect.value ?: allGroups
-        fun load() = service.listForAdmin(tenant.key, pageRequest(), statusFilter.value, query, scope.key, !scope.all && scope.key == null)
+        fun load() = service.listForAdmin(tenant.key, pageRequest(), query, scope.key, !scope.all && scope.key == null)
         var result = load()
         if (result.totalPages > 0 && currentPage >= result.totalPages) {
             currentPage = result.totalPages - 1
@@ -273,8 +267,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         grid.setItems(result.content)
         renderPagination(result.totalPages, result.totalElements)
         if (result.isEmpty) {
-            showEmpty("No features here", if (statusFilter.value.isEmpty()) "Select at least one status to see features."
-                else "Create a feature in this group, or adjust your filters.")
+            showEmpty("No features here", "Create a feature in this group, or adjust your filters.")
         } else {
             grid.isVisible = true
             emptyState.isVisible = false
@@ -292,7 +285,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
 
     private fun renderPagination(totalPages: Int, totalElements: Long) {
         pagination.removeAll()
-        resultSummary.text = "$totalElements features · ${groups.count { it.status == FeatureStatus.ACTIVE }} active groups"
+        resultSummary.text = "$totalElements features · ${groups.size} groups"
         if (totalPages == 0) {
             return
         }
@@ -323,14 +316,30 @@ class MainView(private val service: FeatureToggleService, private val validator:
         pagination.add(next, summary)
     }
 
+    private fun openDeleteTenantDialog() {
+        val tenant = tenantSelect.value ?: return
+        if (tenant.defaultTenant || tenant.key == "default") return
+        val dialog = newDialog("Delete tenant ${tenant.key}?")
+        dialog.add(Paragraph("This tenant, all its groups, features and history will be permanently deleted. This cannot be undone."))
+        dialog.footer.add(Button("Cancel") { dialog.close() })
+        dialog.footer.add(Button("Delete tenant") {
+            runUiAction {
+                service.deleteTenant(tenant.key)
+                dialog.close()
+                refreshTenants()
+                success("Tenant deleted")
+            }
+        }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR) })
+        dialog.open()
+    }
+
     private fun openTenantDialog() {
         val dialog = newDialog("Create tenant")
         val tenantKey = TextField("Tenant key")
         val displayName = TextField("Display name")
-        val defaultTenant = Checkbox("Default tenant")
         tenantKey.isRequired = true
         displayName.isRequired = true
-        dialog.add(form(tenantKey, displayName, defaultTenant))
+        dialog.add(form(tenantKey, displayName))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Create") {
             runUiAction {
@@ -338,7 +347,6 @@ class MainView(private val service: FeatureToggleService, private val validator:
                     validated(CreateTenantRequest(
                         key = tenantKey.value.trim(),
                         displayName = displayName.value.trim(),
-                        defaultTenant = defaultTenant.value,
                     ), mapOf("key" to tenantKey, "displayName" to displayName)),
                 )
                 dialog.close()
@@ -355,7 +363,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         refreshGroups()
         val key = TextField("Key").apply { isRequired = true; maxLength = 255; helperText = "Lowercase letters, digits, dots and hyphens" }
         val group = groupPicker("Group").apply {
-            value = activeGroupChoices().firstOrNull { it.key == groupSelect.value?.key } ?: globalGroup
+            value = groupChoices().firstOrNull { it.key == groupSelect.value?.key } ?: globalGroup
         }
         val type = ComboBox<FeatureType>("Type").apply {
             setItems(*FeatureType.entries.toTypedArray())
@@ -436,10 +444,8 @@ class MainView(private val service: FeatureToggleService, private val validator:
         val groupGrid = Grid<FeatureGroupResponse>()
         groupGrid.addColumn { it.displayName }.setHeader("Name").setFlexGrow(1).setWidth("180px")
         groupGrid.addColumn { it.key }.setHeader("Key").setWidth("160px")
-        groupGrid.addComponentColumn { statusBadge(it.status) }.setHeader("Status").setWidth("130px")
         groupGrid.addComponentColumn { group ->
-            Button("Archive") { dialog.close(); openArchiveGroupDialog(group) }.apply {
-                isEnabled = group.status == FeatureStatus.ACTIVE
+            Button("Delete") { dialog.close(); openDeleteGroupDialog(group) }.apply {
                 addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
             }
         }.setHeader("Action").setWidth("120px")
@@ -453,12 +459,12 @@ class MainView(private val service: FeatureToggleService, private val validator:
         dialog.open()
     }
 
-    private fun activeGroupChoices() = listOf(globalGroup) + groups.filter { it.status == FeatureStatus.ACTIVE }
+    private fun groupChoices() = listOf(globalGroup) + groups
         .map { GroupChoice(it.key, "${it.displayName} (${it.key})") }
 
     private fun groupPicker(label: String) = ComboBox<GroupChoice>(label).apply {
         setItemLabelGenerator { it.label }
-        setItems(activeGroupChoices())
+        setItems(groupChoices())
         isRequired = true
         value = globalGroup
         helperText = "Global stores features outside a group"
@@ -469,7 +475,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         refreshGroups()
         val dialog = newDialog("Move feature")
         val target = groupPicker("Target group").apply {
-            value = activeGroupChoices().firstOrNull { it.key == feature.group }
+            value = groupChoices().firstOrNull { it.key == feature.group }
         }
         val confirm = Button("Move feature") {
             runUiAction {
@@ -494,18 +500,18 @@ class MainView(private val service: FeatureToggleService, private val validator:
         target.focus()
     }
 
-    private fun openArchiveGroupDialog(group: FeatureGroupResponse) {
+    private fun openDeleteGroupDialog(group: FeatureGroupResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = newDialog("Archive group ${group.key}?")
-        dialog.add(Paragraph("All active features in this group will be archived."))
+        val dialog = newDialog("Delete group ${group.key}?")
+        dialog.add(Paragraph("This group and all its features will be permanently deleted. This cannot be undone."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
-        dialog.footer.add(Button("Archive group") {
+        dialog.footer.add(Button("Delete group") {
             runUiAction {
-                service.archiveGroup(tenant.key, group.key, group.version)
+                service.deleteGroup(tenant.key, group.key, group.version)
                 dialog.close()
                 refreshGroups()
                 refreshFeatures()
-                success("Group archived")
+                success("Group deleted")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR) })
         dialog.open()
@@ -547,14 +553,14 @@ class MainView(private val service: FeatureToggleService, private val validator:
         dialog.open()
     }
 
-    private fun openArchiveDialog(feature: AdminFeatureResponse) {
+    private fun openDeleteDialog(feature: AdminFeatureResponse) {
         val tenant = tenantSelect.value ?: return
-        val dialog = newDialog("Archive ${featureName(feature)}?")
-        dialog.add(Paragraph("Archived features disappear from the public API and can be shown by selecting ARCHIVED in the status filter."))
+        val dialog = newDialog("Delete ${featureName(feature)}?")
+        dialog.add(Paragraph("This feature and its history will be permanently deleted. This cannot be undone."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
-        dialog.footer.add(Button("Archive") {
+        dialog.footer.add(Button("Delete") {
             runUiAction {
-                service.archive(tenant.key, feature.key, feature.group, feature.version)
+                service.deleteFeature(tenant.key, feature.key, feature.group, feature.version)
                 dialog.close()
                 refreshFeatures()
                 success("Changes saved")
@@ -596,12 +602,6 @@ class MainView(private val service: FeatureToggleService, private val validator:
         defaultHorizontalComponentAlignment = Alignment.STRETCH
     }
 
-    private fun statusLabel(status: FeatureStatus) = if (status == FeatureStatus.ACTIVE) "Active" else "Archived"
-
-    private fun statusBadge(status: FeatureStatus) = Span(statusLabel(status)).apply {
-        addClassNames("status-badge", if (status == FeatureStatus.ACTIVE) "status-active" else "status-archived")
-    }
-
     private fun <T : Any> validated(request: T, fields: Map<String, HasValidation> = emptyMap()): T {
         fields.values.forEach { it.isInvalid = false }
         val violations = validator.validate(request)
@@ -628,7 +628,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
                 else -> {
                     LoggerFactory.getLogger(MainView::class.java).error("Feature management action failed", exception)
                     if (generateSequence<Throwable>(exception) { it.cause }.any { it is DataIntegrityViolationException }) {
-                        "This key may already exist. Check the group and archived items, then try again."
+                        "This key may already exist. Check the group, then try again."
                     } else "Could not complete the action. Refresh the page and try again."
                 }
             }

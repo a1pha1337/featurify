@@ -2,6 +2,7 @@ package ru.a1pha1337.featurify.controller
 
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -34,6 +35,10 @@ class AdminFeatureController(private val service: FeatureToggleService) {
     @GetMapping("/tenants")
     fun listTenants(): List<TenantResponse> = service.listTenants()
 
+    @DeleteMapping("/tenants/{tenantKey}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun deleteTenant(@PathVariable tenantKey: String) = service.deleteTenant(tenantKey)
+
     @PostMapping("/groups")
     @ResponseStatus(HttpStatus.CREATED)
     fun createGroup(
@@ -45,12 +50,13 @@ class AdminFeatureController(private val service: FeatureToggleService) {
     fun listGroups(@RequestParam(required = false) tenant: String?): List<FeatureGroupResponse> =
         service.listGroups(tenant)
 
-    @PostMapping("/groups/{groupKey}/archive")
-    fun archiveGroup(
+    @DeleteMapping("/groups/{groupKey}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun deleteGroup(
         @RequestParam(required = false) tenant: String?,
         @PathVariable groupKey: String,
         @Valid @RequestBody request: VersionRequest,
-    ): FeatureGroupResponse = service.archiveGroup(tenant, groupKey, request.version)
+    ) = service.deleteGroup(tenant, groupKey, request.version)
 
     @PostMapping("/features")
     @ResponseStatus(HttpStatus.CREATED)
@@ -75,13 +81,14 @@ class AdminFeatureController(private val service: FeatureToggleService) {
         @Valid @RequestBody request: MoveFeatureRequest,
     ): AdminFeatureResponse = service.moveFeature(tenant, key, group, request)
 
-    @PostMapping("/features/{key}/archive")
-    fun archive(
+    @DeleteMapping("/features/{key}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun deleteFeature(
         @RequestParam(required = false) tenant: String?,
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
         @Valid @RequestBody request: VersionRequest,
-    ): AdminFeatureResponse = service.archive(tenant, key, group, request.version)
+    ) = service.deleteFeature(tenant, key, group, request.version)
 
     @GetMapping("/features/{key}/history")
     fun history(

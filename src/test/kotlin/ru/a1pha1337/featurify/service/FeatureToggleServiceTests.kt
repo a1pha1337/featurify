@@ -14,12 +14,12 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
+import ru.a1pha1337.featurify.dto.CreateTenantRequest
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
-import ru.a1pha1337.featurify.domain.FeatureStatus
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.Tenant
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
@@ -94,16 +94,6 @@ class FeatureToggleServiceTests {
     }
 
     @Test
-    fun `archived feature is hidden from public read`() {
-        val feature = booleanFeature(version = 2).copy(status = FeatureStatus.ARCHIVED)
-        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
-
-        assertThrows(NotFoundException::class.java) {
-            service.getActive("blue", feature.key, null)
-        }
-    }
-
-    @Test
     fun `grouped feature lookup uses tenant group and key`() {
         val groupId = UUID.randomUUID()
         val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
@@ -114,7 +104,7 @@ class FeatureToggleServiceTests {
             featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key),
         ).thenReturn(feature)
 
-        val result = service.getActive("blue", feature.key, "checkout")
+        val result = service.getFeature("blue", feature.key, "checkout")
 
         assertEquals("checkout", result.group)
         assertEquals(feature.key, result.key)
@@ -127,33 +117,10 @@ class FeatureToggleServiceTests {
         val feature = booleanFeature(version = 2)
         `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
 
-        val result = service.getActive("blue", feature.key, null)
+        val result = service.getFeature("blue", feature.key, null)
 
         assertEquals(null, result.group)
         verify(featureRepository).findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)
-    }
-
-    @Test
-    fun `archiving group archives all active features in that group`() {
-        val groupId = UUID.randomUUID()
-        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", version = 3, createdAt = now, updatedAt = now)
-        val first = booleanFeature(version = 1).copy(groupId = groupId)
-        val second = booleanFeature(version = 2).copy(id = UUID.randomUUID(), key = "checkout.payment", groupId = groupId)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, group.key)).thenReturn(group)
-        `when`(groupRepository.save(org.mockito.ArgumentMatchers.any(FeatureGroup::class.java)))
-            .thenAnswer { invocation -> invocation.getArgument(0) }
-        `when`(featureRepository.findAllByTenantIdAndGroupIdAndStatus(tenantId, groupId, FeatureStatus.ACTIVE))
-            .thenReturn(listOf(first, second))
-        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
-            .thenAnswer { invocation -> invocation.getArgument(0) }
-        `when`(groupRepository.findById(groupId)).thenReturn(Optional.of(group))
-
-        service.archiveGroup("blue", group.key, group.version)
-
-        val featureCaptor = ArgumentCaptor.forClass(Feature::class.java)
-        verify(featureRepository, org.mockito.Mockito.times(2)).save(featureCaptor.capture())
-        assertEquals(setOf(FeatureStatus.ARCHIVED), featureCaptor.allValues.map { it.status }.toSet())
-        verify(auditRepository, org.mockito.Mockito.times(2)).save(org.mockito.ArgumentMatchers.any())
     }
 
     @Test
@@ -183,10 +150,10 @@ class FeatureToggleServiceTests {
         val pageable = PageRequest.of(1, 10, Sort.by("key"))
         val feature = booleanFeature(version = 2)
         `when`(
-            featureRepository.findAllByTenantIdAndStatus(tenantId, FeatureStatus.ACTIVE, pageable),
+            featureRepository.findAllByTenantId(tenantId, pageable),
         ).thenReturn(PageImpl(listOf(feature), pageable, 11))
 
-        val result = service.listActive("blue", pageable, null)
+        val result = service.listFeatures("blue", pageable, null)
 
         assertEquals(1, result.number)
         assertEquals(10, result.size)
@@ -199,20 +166,18 @@ class FeatureToggleServiceTests {
         val pageable = PageRequest.of(0, 10, Sort.by("key"))
         val feature = booleanFeature(version = 2)
         `when`(
-            featureRepository.findAllByTenantIdAndStatusAndKeyContaining(
+            featureRepository.findAllByTenantIdAndKeyContaining(
                 tenantId,
-                FeatureStatus.ACTIVE,
                 "checkout",
                 pageable,
             ),
         ).thenReturn(PageImpl(listOf(feature), pageable, 1))
 
-        val result = service.listActive("blue", pageable, " CHECKOUT ")
+        val result = service.listFeatures("blue", pageable, " CHECKOUT ")
 
         assertEquals(feature.key, result.content.single().key)
-        verify(featureRepository).findAllByTenantIdAndStatusAndKeyContaining(
+        verify(featureRepository).findAllByTenantIdAndKeyContaining(
             tenantId,
-            FeatureStatus.ACTIVE,
             "checkout",
             pageable,
         )
@@ -223,7 +188,7 @@ class FeatureToggleServiceTests {
         val pageable = PageRequest.of(0, 10)
 
         val exception = assertThrows(DomainValidationException::class.java) {
-            service.listActive("blue", pageable, "ab")
+            service.listFeatures("blue", pageable, "ab")
         }
 
         assertEquals("query", exception.violations.single().first)
@@ -250,31 +215,6 @@ class FeatureToggleServiceTests {
         val featureCaptor = ArgumentCaptor.forClass(Feature::class.java)
         verify(featureRepository).save(featureCaptor.capture())
         assertEquals(defaultTenantId, featureCaptor.value.tenantId)
-    }
-
-    @Test
-    fun `admin feature list filters by selected statuses`() {
-        val pageable = PageRequest.of(0, 20, Sort.by("key"))
-        val archived = booleanFeature(version = 2).copy(status = FeatureStatus.ARCHIVED)
-        val statuses = setOf(FeatureStatus.ACTIVE, FeatureStatus.ARCHIVED)
-        `when`(featureRepository.findAllByTenantIdAndStatusIn(tenantId, statuses, pageable))
-            .thenReturn(PageImpl(listOf(archived), pageable, 1))
-
-        val result = service.listForAdmin("blue", pageable, statuses, null)
-
-        assertEquals(FeatureStatus.ARCHIVED, result.content.single().status)
-        verify(featureRepository).findAllByTenantIdAndStatusIn(tenantId, statuses, pageable)
-    }
-
-    @Test
-    fun `admin feature list is empty when no statuses are selected`() {
-        val pageable = PageRequest.of(0, 20, Sort.by("key"))
-
-        val result = service.listForAdmin("blue", pageable, emptySet(), null)
-
-        assertEquals(0, result.totalElements)
-        verify(featureRepository, never())
-            .findAllByTenantIdAndStatusIn(tenantId, emptySet(), pageable)
     }
 
     @Test
@@ -344,14 +284,14 @@ class FeatureToggleServiceTests {
     }
 
     @Test
-    fun `move rejects occupied destination including archived features`() {
+    fun `move rejects occupied destination`() {
         val groupId = UUID.randomUUID()
         val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(2)
         `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
         `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
         `when`(featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key))
-            .thenReturn(feature.copy(id = UUID.randomUUID(), groupId = groupId, status = FeatureStatus.ARCHIVED))
+            .thenReturn(feature.copy(id = UUID.randomUUID(), groupId = groupId))
 
         assertThrows(ConflictException::class.java) {
             service.moveFeature("blue", feature.key, null, MoveFeatureRequest(2, "checkout"))
@@ -364,32 +304,87 @@ class FeatureToggleServiceTests {
         val groupId = UUID.randomUUID()
         val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val page = PageRequest.of(1, 20)
-        val statuses = setOf(FeatureStatus.ACTIVE)
         `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findAllByTenantIdAndGroupIdAndStatusInAndKeyContaining(
-            tenantId, groupId, statuses, "checkout", page,
+        `when`(featureRepository.findAllByTenantIdAndGroupIdAndKeyContaining(
+            tenantId, groupId, "checkout", page,
         )).thenReturn(PageImpl(emptyList(), page, 21))
 
-        val result = service.listForAdmin("blue", page, statuses, " CHECKOUT ", "checkout")
+        val result = service.listForAdmin("blue", page, " CHECKOUT ", "checkout")
 
         assertEquals(21, result.totalElements)
         assertEquals(1, result.number)
-        verify(featureRepository).findAllByTenantIdAndGroupIdAndStatusInAndKeyContaining(
-            tenantId, groupId, statuses, "checkout", page,
+        verify(featureRepository).findAllByTenantIdAndGroupIdAndKeyContaining(
+            tenantId, groupId, "checkout", page,
         )
     }
 
     @Test
     fun `global filter does not include grouped features`() {
         val page = PageRequest.of(0, 20)
-        val statuses = setOf(FeatureStatus.ACTIVE)
-        `when`(featureRepository.findAllByTenantIdAndGroupIdIsNullAndStatusIn(tenantId, statuses, page))
+        `when`(featureRepository.findAllByTenantIdAndGroupIdIsNull(tenantId, page))
             .thenReturn(PageImpl(listOf(booleanFeature(1)), page, 1))
 
-        val result = service.listForAdmin("blue", page, statuses, null, globalOnly = true)
+        val result = service.listForAdmin("blue", page, null, globalOnly = true)
 
         assertEquals(null, result.content.single().group)
-        verify(featureRepository).findAllByTenantIdAndGroupIdIsNullAndStatusIn(tenantId, statuses, page)
+        verify(featureRepository).findAllByTenantIdAndGroupIdIsNull(tenantId, page)
+    }
+
+    @Test
+    fun `new tenant is never default`() {
+        `when`(tenantRepository.save(org.mockito.ArgumentMatchers.any(Tenant::class.java)))
+            .thenAnswer { it.getArgument<Tenant>(0).copy(id = UUID.randomUUID()) }
+
+        val created = service.createTenant(CreateTenantRequest("green", "Green"))
+
+        assertEquals(false, created.defaultTenant)
+        val saved = ArgumentCaptor.forClass(Tenant::class.java)
+        verify(tenantRepository).save(saved.capture())
+        assertEquals(false, saved.value.defaultTenant)
+    }
+
+    @Test
+    fun `system default tenant cannot be created through service`() {
+        val error = assertThrows(DomainValidationException::class.java) {
+            service.createTenant(CreateTenantRequest("default", "Replacement"))
+        }
+
+        assertEquals("key", error.violations.single().first)
+        verify(tenantRepository, never()).save(org.mockito.ArgumentMatchers.any())
+    }
+
+    @Test
+    fun `delete feature requires current version`() {
+        val feature = booleanFeature(3)
+        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        assertThrows(ConflictException::class.java) { service.deleteFeature("blue", feature.key, null, 2) }
+        assertThrows(DomainValidationException::class.java) { service.deleteFeature("blue", feature.key, null, null) }
+        verify(featureRepository, never()).delete(feature)
+        service.deleteFeature("blue", feature.key, null, 3)
+        verify(featureRepository).delete(feature)
+    }
+
+    @Test
+    fun `delete group requires current version`() {
+        val group = FeatureGroup(UUID.randomUUID(), tenantId, "checkout", "Checkout", version = 3, createdAt = now, updatedAt = now)
+        `when`(groupRepository.findByTenantIdAndKey(tenantId, group.key)).thenReturn(group)
+        assertThrows(ConflictException::class.java) { service.deleteGroup("blue", group.key, 2) }
+        assertThrows(DomainValidationException::class.java) { service.deleteGroup("blue", group.key, null) }
+        verify(groupRepository, never()).delete(group)
+        service.deleteGroup("blue", group.key, 3)
+        verify(groupRepository).delete(group)
+    }
+
+    @Test
+    fun `delete tenant rejects default and unknown tenant`() {
+        val default = Tenant(UUID.randomUUID(), "default", "Default", true, now, now, true)
+        `when`(tenantRepository.findByKey("default")).thenReturn(default)
+        assertThrows(ConflictException::class.java) { service.deleteTenant("default") }
+        assertThrows(NotFoundException::class.java) { service.deleteTenant("missing") }
+        verify(tenantRepository, never()).delete(default)
+        service.deleteTenant("blue")
+        val blue = Tenant(tenantId, "blue", "Blue", true, now, now)
+        verify(tenantRepository).delete(blue)
     }
 
     private fun booleanFeature(version: Long) = Feature(

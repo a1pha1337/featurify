@@ -16,7 +16,6 @@ data class Feature(
     val booleanValue: Boolean? = null,
     val enumValue: String? = null,
     val description: String = "",
-    val status: FeatureStatus = FeatureStatus.ACTIVE,
     @Version val version: Long? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
