@@ -3,6 +3,7 @@ package ru.a1pha1337.featurify.view
 import com.vaadin.flow.component.Component
 import com.vaadin.flow.component.UI
 import com.vaadin.flow.component.button.Button
+import com.vaadin.flow.component.checkbox.CheckboxGroup
 import com.vaadin.flow.component.combobox.ComboBox
 import com.vaadin.flow.component.dialog.Dialog
 import com.vaadin.flow.component.grid.Grid
@@ -451,5 +452,81 @@ class MainViewTests {
             combo.listDataView.items
                 .toList()
                 .single { combo.itemLabelGenerator.apply(it) == label }
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun `vector creation selects independent enabled elements`() {
+        button(view, "New feature").click()
+        val dialog = dialog()
+        combo(dialog, "Type").value = FeatureType.VECTOR
+        field(dialog, "Key").value = "feat"
+        val elements =
+            components(dialog).filterIsInstance<com.vaadin.flow.component.combobox.MultiSelectComboBox<*>>().single()
+                as com.vaadin.flow.component.combobox.MultiSelectComboBox<String>
+        val enabled = components(dialog).filterIsInstance<CheckboxGroup<*>>().single() as CheckboxGroup<String>
+        button(dialog, "Create").click()
+        assertThat(elements.isInvalid).isTrue()
+        listOf("CAT", "DOG", "SHIP").forEach { name ->
+            com.vaadin.flow.component.ComponentUtil.fireEvent(
+                elements,
+                com.vaadin.flow.component.combobox.ComboBoxBase
+                    .CustomValueSetEvent(elements, true, name),
+            )
+        }
+        enabled.value = setOf("CAT", "DOG")
+        button(dialog, "Create").click()
+        verify(exactly = 1) {
+            service.createFeature(
+                "blue",
+                CreateFeatureRequest(
+                    "feat",
+                    FeatureType.VECTOR,
+                    vectorValues = mapOf("CAT" to true, "DOG" to true, "SHIP" to false),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `inline vector element uses latest version and preserves displayed state on failure`() {
+        feature = feature.copy(type = FeatureType.VECTOR, value = mapOf("CAT" to true, "DOG" to false, "SHIP" to false))
+        val editor = valueEditor()
+        val dog = button(editor, "DOG: Disabled")
+        every { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, vectorValues = mapOf("DOG" to true))) } returns
+            feature.copy(version = 8, value = mapOf("CAT" to true, "DOG" to true, "SHIP" to false))
+        dog.click()
+        assertThat(dog.element.getAttribute("aria-checked")).isEqualTo("true")
+        assertThat(button(editor, "SHIP: Disabled").element.getAttribute("aria-checked")).isEqualTo("false")
+        every { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, vectorValues = mapOf("DOG" to false))) } throws
+            ru.a1pha1337.featurify.service
+                .ConflictException("Stale version")
+        dog.click()
+        assertThat(dog.element.getAttribute("aria-checked")).isEqualTo("true")
+        verify(
+            exactly = 1,
+        ) { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, vectorValues = mapOf("DOG" to false))) }
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun `vector edit saves selected enabled elements`() {
+        feature = feature.copy(type = FeatureType.VECTOR, value = mapOf("CAT" to true, "DOG" to false, "SHIP" to false))
+        grid().select(feature)
+        button(view, "Edit").click()
+        val dialog = dialog()
+        val enabled = components(dialog).filterIsInstance<CheckboxGroup<*>>().single() as CheckboxGroup<String>
+        assertThat(enabled.value).containsExactly("CAT")
+        enabled.value = setOf("CAT", "DOG")
+        button(dialog, "Save").click()
+        verify(exactly = 1) {
+            service.editFeature(
+                "blue",
+                feature.key,
+                "source",
+                "source",
+                PatchFeatureRequest(7, description = "Checkout flag", vectorValues = mapOf("CAT" to true, "DOG" to true, "SHIP" to false)),
+            )
+        }
     }
 }

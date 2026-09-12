@@ -26,4 +26,11 @@ data class CreateFeatureRequest(
         @Size(max = 255)
         String,
     > = emptyList(),
+    @field:Size(max = 100)
+    val vectorValues: Map<
+        @NotBlank
+        @Size(max = 255)
+        String,
+        @NotNull Boolean,
+    > = emptyMap(),
 )

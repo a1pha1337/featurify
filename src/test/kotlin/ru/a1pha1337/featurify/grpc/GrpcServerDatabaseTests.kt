@@ -23,8 +23,10 @@ import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.dto.CreatedAccessTokenResponse
+import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
+import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest
 import ru.a1pha1337.featurify.service.AccessTokenService
 import ru.a1pha1337.featurify.service.FeatureToggleService
 import java.util.UUID
@@ -146,5 +148,38 @@ open class GrpcServerDatabaseTests {
                 .unpack(ErrorInfo::class.java)
                 .reason,
         ).isEqualTo("UNAUTHORIZED")
+    }
+
+    @Test
+    fun `vector RPC reads persisted changes over real transport`() {
+        val (namespace, token) = namespace(false)
+        val feature =
+            features.createFeature(
+                namespace,
+                CreateFeatureRequest(
+                    "feat",
+                    FeatureType.VECTOR,
+                    vectorValues = mapOf("CAT" to true, "DOG" to false, "SHIP" to false),
+                ),
+            )
+
+        fun vectorRequest(element: String) =
+            GetVectorFeatureRequest
+                .newBuilder()
+                .setKey("feat")
+                .setElement(element)
+                .build()
+        assertThat(stub(token.token).getVectorFeature(vectorRequest("CAT")).value).isTrue()
+        assertThat(stub(token.token).getVectorFeature(vectorRequest("DOG")).value).isFalse()
+        val changed =
+            features.patchFeature(
+                namespace,
+                "feat",
+                null,
+                PatchFeatureRequest(feature.version, vectorValues = mapOf("DOG" to true)),
+            )
+        assertThat(stub(token.token).getVectorFeature(vectorRequest("DOG")).value).isTrue()
+        assertThat(stub(token.token).getVectorFeature(vectorRequest("SHIP")).value).isFalse()
+        assertThat(stub(token.token).getVectorFeature(vectorRequest("DOG")).version).isEqualTo(changed.version)
     }
 }

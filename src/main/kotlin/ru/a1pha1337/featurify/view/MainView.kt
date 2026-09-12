@@ -5,6 +5,7 @@ import com.vaadin.flow.component.HasValidation
 import com.vaadin.flow.component.button.Button
 import com.vaadin.flow.component.button.ButtonVariant
 import com.vaadin.flow.component.checkbox.Checkbox
+import com.vaadin.flow.component.checkbox.CheckboxGroup
 import com.vaadin.flow.component.combobox.ComboBox
 import com.vaadin.flow.component.combobox.MultiSelectComboBox
 import com.vaadin.flow.component.dialog.Dialog
@@ -168,8 +169,13 @@ class MainView(
             .setWidth("170px")
             .setFlexGrow(1)
         grid
-            .addColumn { if (it.type == FeatureType.BOOLEAN) "Boolean" else "Enum" }
-            .setHeader("Type")
+            .addColumn {
+                when (it.type) {
+                    FeatureType.BOOLEAN -> "Boolean"
+                    FeatureType.ENUM -> "Enum"
+                    FeatureType.VECTOR -> "Vector"
+                }
+            }.setHeader("Type")
             .setWidth("110px")
             .setFlexGrow(0)
         grid
@@ -247,6 +253,42 @@ class MainView(
     private fun valueEditor(feature: AdminFeatureResponse): Component {
         val namespaceKey = namespaceSelect.value?.key ?: return Span()
         var current = feature
+        if (feature.type == FeatureType.VECTOR) {
+            val elements =
+                VerticalLayout().apply {
+                    isPadding = false
+                    isSpacing = false
+                }
+            vectorValues(feature).forEach { (name, _) ->
+                val toggle =
+                    Button().apply {
+                        element.setAttribute("role", "switch")
+                        element.setAttribute("aria-label", "Toggle ${featureName(feature)} element $name")
+                    }
+
+                fun render() {
+                    val enabled = vectorValues(current).getValue(name)
+                    toggle.text = "$name: ${if (enabled) "Enabled" else "Disabled"}"
+                    toggle.element.setAttribute("aria-checked", enabled.toString())
+                }
+                render()
+                toggle.addClickListener {
+                    runUiAction {
+                        current =
+                            service.patchFeature(
+                                namespaceKey,
+                                current.key,
+                                current.group,
+                                PatchFeatureRequest(current.version, vectorValues = mapOf(name to !vectorValues(current).getValue(name))),
+                            )
+                        render()
+                        refreshFeatures()
+                    }
+                }
+                elements.add(toggle)
+            }
+            return elements
+        }
         if (feature.type == FeatureType.BOOLEAN) {
             val toggle =
                 Button().apply {
@@ -304,6 +346,10 @@ class MainView(
             }
         }
     }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun vectorValues(feature: AdminFeatureResponse): Map<String, Boolean> =
+        if (feature.type == FeatureType.VECTOR) feature.value as Map<String, Boolean> else emptyMap()
 
     private fun filtersChanged() {
         if (!updatingControls) {
@@ -630,6 +676,7 @@ class MainView(
                 helperText = "Type a value and press Enter. Remove values with the cross."
                 setItems(emptyList<String>())
             }
+        val vectorEnabled = CheckboxGroup<String>("Enabled elements")
         val availableOptions = linkedSetOf<String>()
         enumOptions.addCustomValueSetListener { event ->
             val option = event.detail.trim()
@@ -649,26 +696,31 @@ class MainView(
         enumOptions.addValueChangeListener {
             val current = enumValue.value
             val options = availableOptions.filter { it in enumOptions.value }
+            val enabled = vectorEnabled.value.intersect(options.toSet())
+            vectorEnabled.setItems(options)
+            vectorEnabled.value = enabled
             enumValue.setItems(options)
             enumValue.value = current?.takeIf { it in options } ?: options.firstOrNull()
         }
 
         fun updateFields() {
             val isEnum = type.value == FeatureType.ENUM
-            booleanValue.isVisible = !isEnum
+            booleanValue.isVisible = type.value == FeatureType.BOOLEAN
             enumValue.isVisible = isEnum
-            enumOptions.isVisible = isEnum
+            enumOptions.isVisible = isEnum || type.value == FeatureType.VECTOR
+            enumOptions.label = if (type.value == FeatureType.VECTOR) "Elements" else "Allowed values"
+            vectorEnabled.isVisible = type.value == FeatureType.VECTOR
         }
         type.addValueChangeListener { updateFields() }
         updateFields()
-        dialog.add(form(key, group, type, description, booleanValue, enumOptions, enumValue))
+        dialog.add(form(key, group, type, description, booleanValue, enumOptions, enumValue, vectorEnabled))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(
             Button("Create") {
                 runUiAction {
                     val selectedType = type.value
                     val options = availableOptions.filter { it in enumOptions.value }
-                    if (selectedType == FeatureType.ENUM && options.isEmpty()) {
+                    if (selectedType != FeatureType.BOOLEAN && options.isEmpty()) {
                         enumOptions.isInvalid = true
                         enumOptions.errorMessage = "Add at least one allowed value"
                         return@runUiAction
@@ -684,6 +736,14 @@ class MainView(
                                 booleanValue = booleanValue.value.takeIf { selectedType == FeatureType.BOOLEAN },
                                 enumValue = enumValue.value.takeIf { selectedType == FeatureType.ENUM },
                                 enumOptions = options.takeIf { selectedType == FeatureType.ENUM } ?: emptyList(),
+                                vectorValues =
+                                    if (selectedType ==
+                                        FeatureType.VECTOR
+                                    ) {
+                                        options.associateWith { it in vectorEnabled.value }
+                                    } else {
+                                        emptyMap()
+                                    },
                             ),
                             mapOf("key" to key, "type" to type, "description" to description),
                         ),
@@ -834,7 +894,14 @@ class MainView(
                 value = feature.value as? String
                 isVisible = feature.type == FeatureType.ENUM
             }
-        dialog.add(form(group, description, booleanValue, enumValue))
+        val vectorEnabled =
+            CheckboxGroup<String>("Enabled elements").apply {
+                val elements = vectorValues(feature)
+                setItems(elements.keys)
+                value = elements.filterValues { it }.keys
+                isVisible = feature.type == FeatureType.VECTOR
+            }
+        dialog.add(form(group, description, booleanValue, enumValue, vectorEnabled))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(
             Button("Save") {
@@ -851,6 +918,14 @@ class MainView(
                                 description = description.value,
                                 booleanValue = booleanValue.value.takeIf { feature.type == FeatureType.BOOLEAN },
                                 enumValue = enumValue.value.takeIf { feature.type == FeatureType.ENUM },
+                                vectorValues =
+                                    if (feature.type ==
+                                        FeatureType.VECTOR
+                                    ) {
+                                        vectorValues(feature).keys.associateWith { it in vectorEnabled.value }
+                                    } else {
+                                        null
+                                    },
                             ),
                         )
                     dialog.close()

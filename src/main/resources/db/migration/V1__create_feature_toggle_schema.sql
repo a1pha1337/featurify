@@ -89,11 +89,13 @@ CREATE TABLE feature
     CONSTRAINT fk_feature_group_namespace FOREIGN KEY (group_id, namespace_id)
         REFERENCES feature_group (id, namespace_id) ON DELETE CASCADE,
     CONSTRAINT ck_feature_key CHECK (key ~ '^[A-Za-z]([A-Za-z0-9]|[.-][A-Za-z0-9])*$'),
-    CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM')),
+    CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM', 'VECTOR')),
     CONSTRAINT ck_feature_typed_value CHECK (
         (type = 'BOOLEAN' AND boolean_value IS NOT NULL AND enum_value IS NULL)
             OR
         (type = 'ENUM' AND boolean_value IS NULL AND enum_value IS NOT NULL)
+            OR
+        (type = 'VECTOR' AND boolean_value IS NULL AND enum_value IS NULL)
         )
 );
 
@@ -122,6 +124,15 @@ CREATE TABLE feature_enum_option
     CONSTRAINT ck_feature_enum_option_order CHECK (sort_order >= 0)
 );
 
+CREATE TABLE feature_vector_element
+(
+    feature_id UUID NOT NULL REFERENCES feature (id) ON DELETE CASCADE,
+    element VARCHAR(255) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY (feature_id, element),
+    CONSTRAINT ck_vector_element_name CHECK (length(trim(element)) > 0 AND element = trim(element))
+);
+
 CREATE TABLE feature_audit_log
 (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -131,8 +142,8 @@ CREATE TABLE feature_audit_log
     feature_group VARCHAR(255),
     feature_key VARCHAR(255) NOT NULL,
     operation   VARCHAR(32)  NOT NULL,
-    old_value   VARCHAR(255),
-    new_value   VARCHAR(255),
+    old_value   TEXT,
+    new_value   TEXT,
     changed_by  VARCHAR(255) NOT NULL,
     changed_at  TIMESTAMPTZ  NOT NULL,
     CONSTRAINT ck_feature_audit_operation CHECK (operation IN ('VALUE_CHANGED'))

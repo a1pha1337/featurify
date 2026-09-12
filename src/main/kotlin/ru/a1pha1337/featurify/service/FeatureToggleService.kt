@@ -11,6 +11,7 @@ import ru.a1pha1337.featurify.domain.FeatureAuditLog
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
+import ru.a1pha1337.featurify.domain.FeatureVectorElement
 import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
 import ru.a1pha1337.featurify.dto.AuditLogResponse
@@ -24,6 +25,7 @@ import ru.a1pha1337.featurify.dto.NamespaceResponse
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.ResolveResponse
 import ru.a1pha1337.featurify.dto.ValidationPatterns
+import ru.a1pha1337.featurify.dto.VectorElementResponse
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
 import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
@@ -167,6 +169,7 @@ class FeatureToggleService(
                     groupId = group?.id,
                     booleanValue = request.booleanValue,
                     enumValue = request.enumValue,
+                    vectorElements = request.vectorValues.mapValues { FeatureVectorElement(it.value) },
                     description = request.description,
                     createdAt = now,
                     updatedAt = now,
@@ -231,6 +234,20 @@ class FeatureToggleService(
     ): FeatureResponse {
         val feature = requireFeature(namespaceId, key, normalizeGroup(group))
         return feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
+    }
+
+    @Transactional(readOnly = true)
+    fun getVectorElementInNamespace(
+        namespaceId: UUID,
+        key: String,
+        group: String?,
+        element: String,
+    ): VectorElementResponse {
+        if (element.isBlank() || element.length > 255) throw validation("element", "must contain 1-255 characters")
+        val feature = requireFeature(namespaceId, key, normalizeGroup(group))
+        if (feature.type != FeatureType.VECTOR) throw ConflictException("Feature is not VECTOR")
+        val value = feature.vectorElements[element] ?: throw NotFoundException("Vector element was not found")
+        return VectorElementResponse(groupKeyFor(feature), feature.key, element, value.enabled, feature.version ?: 0)
     }
 
     @Transactional(readOnly = true)
@@ -339,6 +356,14 @@ class FeatureToggleService(
             current.copy(
                 booleanValue = newBoolean,
                 enumValue = newEnum,
+                vectorElements =
+                    current.vectorElements + (
+                        request.vectorValues?.mapValues {
+                            FeatureVectorElement(
+                                it.value,
+                            )
+                        } ?: emptyMap()
+                    ),
                 description = request.description ?: current.description,
                 updatedAt = clock.instant(),
             )
@@ -404,7 +429,17 @@ class FeatureToggleService(
         request: CreateFeatureRequest,
         type: FeatureType,
     ) {
+        if (type != FeatureType.VECTOR && request.vectorValues.isNotEmpty()) {
+            throw validation("vectorValues", "is only allowed for VECTOR")
+        }
         when (type) {
+            FeatureType.VECTOR -> {
+                if (request.booleanValue != null) throw validation("booleanValue", "is only allowed for BOOLEAN")
+                if (request.enumValue != null) throw validation("enumValue", "is only allowed for ENUM")
+                if (request.enumOptions.isNotEmpty()) throw validation("enumOptions", "is only allowed for ENUM")
+                validateVectorValues(request.vectorValues)
+            }
+
             FeatureType.BOOLEAN -> {
                 if (request.booleanValue == null) throw validation("booleanValue", "is required for BOOLEAN")
                 if (request.enumValue != null) throw validation("enumValue", "is only allowed for ENUM")
@@ -431,17 +466,31 @@ class FeatureToggleService(
         }
     }
 
+    private fun validateVectorValues(values: Map<String, Boolean>) {
+        if (values.size !in 1..100) throw validation("vectorValues", "must contain between 1 and 100 elements")
+        if (values.keys.any { it.isBlank() || it.length > 255 || it != it.trim() }) {
+            throw validation("vectorValues", "element names must contain 1-255 characters without surrounding whitespace")
+        }
+    }
+
     private fun validatePatch(
         current: Feature,
         request: PatchFeatureRequest,
     ) {
-        if (request.description == null && request.booleanValue == null && request.enumValue == null) {
+        if (request.description == null && request.booleanValue == null && request.enumValue == null && request.vectorValues == null) {
             throw validation("request", "must change value and/or description")
         }
-        if (current.type == FeatureType.BOOLEAN && request.enumValue != null) {
+        request.vectorValues?.let { values ->
+            if (current.type != FeatureType.VECTOR) throw validation("vectorValues", "is only allowed for VECTOR")
+            validateVectorValues(values)
+            if (values.keys.any { it !in current.vectorElements }) {
+                throw validation("vectorValues", "must contain only existing elements")
+            }
+        }
+        if (current.type != FeatureType.ENUM && request.enumValue != null) {
             throw validation("enumValue", "is only allowed for ENUM")
         }
-        if (current.type == FeatureType.ENUM && request.booleanValue != null) {
+        if (current.type != FeatureType.BOOLEAN && request.booleanValue != null) {
             throw validation("booleanValue", "is only allowed for BOOLEAN")
         }
     }
@@ -598,7 +647,7 @@ class FeatureToggleService(
         group = group,
         key = key,
         type = type,
-        value = if (type == FeatureType.BOOLEAN) booleanValue!! else enumValue!!,
+        value = value(),
         enumOptions = options.takeIf { type == FeatureType.ENUM },
         version = version ?: 0,
     )
@@ -610,7 +659,7 @@ class FeatureToggleService(
         group = group,
         key = key,
         type = type,
-        value = if (type == FeatureType.BOOLEAN) booleanValue!! else enumValue!!,
+        value = value(),
         enumOptions = options.takeIf { type == FeatureType.ENUM },
         description = description,
         version = version ?: 0,

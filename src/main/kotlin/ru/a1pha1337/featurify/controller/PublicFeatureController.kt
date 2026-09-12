@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import ru.a1pha1337.featurify.dto.FeatureResponse
 import ru.a1pha1337.featurify.dto.ResolveResponse
+import ru.a1pha1337.featurify.dto.VectorElementResponse
 import ru.a1pha1337.featurify.security.NamespacePrincipal
 import ru.a1pha1337.featurify.service.FeatureToggleService
 
@@ -34,6 +35,15 @@ class PublicFeatureController(
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
     ): FeatureResponse = service.getFeatureInNamespace(principal.requireNamespace(namespace), key, group)
+
+    @GetMapping("/features/{key}/elements/{element}")
+    fun getVectorElement(
+        @AuthenticationPrincipal(errorOnInvalidType = true) principal: NamespacePrincipal,
+        @RequestParam(required = false) namespace: String?,
+        @RequestParam(required = false) group: String?,
+        @PathVariable key: String,
+        @PathVariable element: String,
+    ): VectorElementResponse = service.getVectorElementInNamespace(principal.requireNamespace(namespace), key, group, element)
 
     @GetMapping("/features:resolve")
     fun resolve(

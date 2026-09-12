@@ -264,4 +264,87 @@ class FeatureSecurityDatabaseTests {
                 ).isEqualTo("METHOD_NOT_ALLOWED")
             }
     }
+
+    @Test
+    fun `vector REST reads isolate namespace and expose independent element states`() {
+        features.createFeature(
+            blue.key,
+            CreateFeatureRequest(
+                "feat",
+                FeatureType.VECTOR,
+                vectorValues =
+                    mapOf(
+                        "DOG" to true,
+                        "SHIP" to false,
+                    ),
+            ),
+        )
+        features.createFeature(red.key, CreateFeatureRequest("feat", FeatureType.VECTOR, vectorValues = mapOf("DOG" to false)))
+        val path = "/api/v1/features/feat/elements"
+        mvc.perform(get("$path/DOG")).andExpect { assertThat(it.response.status).isEqualTo(401) }
+        mvc.perform(head("$path/DOG")).andExpect { assertThat(it.response.status).isEqualTo(401) }
+        mvc.perform(get("$path/DOG").with(jwt())).andExpect { assertThat(it.response.status).isEqualTo(401) }
+        mvc
+            .perform(get("$path/DOG").header("Authorization", "Bearer ${blueToken.token}"))
+            .andExpect {
+                assertThat(it.response.status).isEqualTo(200)
+                val body = JsonMapper().readTree(it.response.contentAsString)
+                assertThat(body.path("key").asString()).isEqualTo("feat")
+                assertThat(body.path("element").asString()).isEqualTo("DOG")
+                assertThat(body.path("value").asBoolean()).isTrue()
+            }
+        for ((token, element) in listOf(blueToken.token to "SHIP", redToken.token to "DOG")) {
+            mvc
+                .perform(get("$path/$element").header("Authorization", "Bearer $token"))
+                .andExpect {
+                    assertThat(it.response.status).isEqualTo(200)
+                    assertThat(JsonMapper().readTree(it.response.contentAsString).path("value").asBoolean()).isFalse()
+                }
+        }
+        mvc
+            .perform(get("$path/dog").header("Authorization", "Bearer ${blueToken.token}"))
+            .andExpect { assertThat(it.response.status).isEqualTo(404) }
+        mvc
+            .perform(get("$path/DOG").param("namespace", red.key).header("Authorization", "Bearer ${blueToken.token}"))
+            .andExpect { assertThat(it.response.status).isEqualTo(403) }
+    }
+
+    @Test
+    fun `admin REST creates and partially patches vector values and rejects null states`() {
+        val url = "/api/v1/features"
+        val response =
+            mvc
+                .perform(
+                    post(url)
+                        .param("namespace", blue.key)
+                        .with(jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""{"key":"feat","type":"VECTOR","vectorValues":{"CAT":true,"DOG":false,"SHIP":false}}"""),
+                ).andExpect { assertThat(it.response.status).isEqualTo(201) }
+                .andReturn()
+                .response
+        val version = JsonMapper().readTree(response.contentAsString).path("version").asLong()
+        mvc
+            .perform(
+                patch("$url/feat")
+                    .param("namespace", blue.key)
+                    .with(jwt())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"version":$version,"vectorValues":{"DOG":true}}"""),
+            ).andExpect {
+                assertThat(it.response.status).isEqualTo(200)
+                val values = JsonMapper().readTree(it.response.contentAsString).path("value")
+                assertThat(values.path("CAT").asBoolean()).isTrue()
+                assertThat(values.path("DOG").asBoolean()).isTrue()
+                assertThat(values.path("SHIP").asBoolean()).isFalse()
+            }
+        mvc
+            .perform(
+                post(url)
+                    .param("namespace", blue.key)
+                    .with(jwt())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"key":"invalid","type":"VECTOR","vectorValues":{"DOG":null}}"""),
+            ).andExpect { assertThat(it.response.status).isEqualTo(400) }
+    }
 }

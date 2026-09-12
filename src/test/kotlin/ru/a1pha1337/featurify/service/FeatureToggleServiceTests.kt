@@ -5,6 +5,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -15,6 +16,7 @@ import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
+import ru.a1pha1337.featurify.domain.FeatureVectorElement
 import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
@@ -452,4 +454,121 @@ class FeatureToggleServiceTests {
             createdAt = now,
             updatedAt = now,
         )
+
+    @Test
+    fun `vector creation keeps independent element states`() {
+        every { featureRepository.save(any<Feature>()) } answers { firstArg<Feature>().copy(id = featureId, version = 0) }
+        val values = mapOf("CAT" to true, "DOG" to true, "SHIP" to false)
+        val created = service.createFeature("blue", CreateFeatureRequest("feat", FeatureType.VECTOR, vectorValues = values))
+        assertThat(created.type).isEqualTo(FeatureType.VECTOR)
+        assertThat(created.value).isEqualTo(values)
+        assertThat(created.enumOptions).isNull()
+        verify(exactly = 0) { optionRepository.saveAll(any<List<FeatureEnumOption>>()) }
+    }
+
+    @Test
+    fun `vector patch changes only selected elements and records old and new values`() {
+        every { auditRepository.save(any<ru.a1pha1337.featurify.domain.FeatureAuditLog>()) } answers { firstArg() }
+        val current =
+            booleanFeature(3).copy(
+                type = FeatureType.VECTOR,
+                booleanValue = null,
+                vectorElements =
+                    mapOf(
+                        "CAT" to FeatureVectorElement(true),
+                        "DOG" to FeatureVectorElement(false),
+                        "SHIP" to FeatureVectorElement(false),
+                    ),
+            )
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns current
+        every { featureRepository.save(any<Feature>()) } answers { firstArg<Feature>().copy(version = 4) }
+        val result = service.patchFeature("blue", current.key, null, PatchFeatureRequest(3, vectorValues = mapOf("DOG" to true)))
+        assertThat(result.value).isEqualTo(mapOf("CAT" to true, "DOG" to true, "SHIP" to false))
+        assertThat(result.version).isEqualTo(4)
+        verify(exactly = 1) {
+            auditRepository.save(
+                match {
+                    it.oldValue == """{"CAT":true,"DOG":false,"SHIP":false}""" &&
+                        it.newValue == """{"CAT":true,"DOG":true,"SHIP":false}"""
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `vector lookup distinguishes disabled missing and wrong type`() {
+        val current =
+            booleanFeature(3).copy(
+                type = FeatureType.VECTOR,
+                booleanValue = null,
+                vectorElements = mapOf("DOG" to FeatureVectorElement(true), "SHIP" to FeatureVectorElement(false)),
+            )
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns current
+        assertThat(service.getVectorElementInNamespace(namespaceId, current.key, null, "DOG").value).isTrue()
+        assertThat(service.getVectorElementInNamespace(namespaceId, current.key, null, "SHIP").value).isFalse()
+        assertThatThrownBy {
+            service.getVectorElementInNamespace(namespaceId, current.key, null, "dog")
+        }.isInstanceOf(NotFoundException::class.java)
+        assertThatThrownBy {
+            service.getVectorElementInNamespace(namespaceId, current.key, null, " ")
+        }.isInstanceOf(DomainValidationException::class.java)
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns booleanFeature(3)
+        assertThatThrownBy {
+            service.getVectorElementInNamespace(namespaceId, current.key, null, "DOG")
+        }.isInstanceOf(ConflictException::class.java)
+    }
+
+    @Test
+    fun `vector creation rejects empty invalid oversized and mixed type values`() {
+        val valid = CreateFeatureRequest("feat", FeatureType.VECTOR, vectorValues = mapOf("DOG" to false))
+        val invalid =
+            listOf(
+                valid.copy(vectorValues = emptyMap()),
+                valid.copy(vectorValues = mapOf(" " to false)),
+                valid.copy(vectorValues = mapOf(" DOG" to false)),
+                valid.copy(vectorValues = mapOf("x".repeat(256) to false)),
+                valid.copy(vectorValues = (1..101).associate { "E$it" to false }),
+                valid.copy(booleanValue = true),
+                valid.copy(enumValue = "DOG"),
+                valid.copy(enumOptions = listOf("DOG")),
+                valid.copy(type = FeatureType.BOOLEAN, booleanValue = true),
+                valid.copy(type = FeatureType.ENUM, enumValue = "DOG", enumOptions = listOf("DOG")),
+            )
+        invalid.forEach { request ->
+            assertThatThrownBy { service.createFeature("blue", request) }.isInstanceOf(DomainValidationException::class.java)
+        }
+        verify(exactly = 0) { featureRepository.save(any()) }
+    }
+
+    @Test
+    fun `vector patch rejects unknown elements stale versions and incompatible values`() {
+        val current =
+            booleanFeature(3).copy(
+                type = FeatureType.VECTOR,
+                booleanValue = null,
+                vectorElements = mapOf("DOG" to FeatureVectorElement(false)),
+            )
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns current
+        listOf(
+            PatchFeatureRequest(3, vectorValues = mapOf("CAT" to true)),
+            PatchFeatureRequest(3, vectorValues = emptyMap()),
+            PatchFeatureRequest(3, booleanValue = true),
+            PatchFeatureRequest(3, enumValue = "DOG"),
+        ).forEach { request ->
+            assertThatThrownBy {
+                service.patchFeature(
+                    "blue",
+                    current.key,
+                    null,
+                    request,
+                )
+            }.isInstanceOf(DomainValidationException::class.java)
+        }
+        assertThatThrownBy { service.patchFeature("blue", current.key, null, PatchFeatureRequest(2, vectorValues = mapOf("DOG" to true))) }
+            .isInstanceOf(ConflictException::class.java)
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns booleanFeature(3)
+        assertThatThrownBy { service.patchFeature("blue", current.key, null, PatchFeatureRequest(3, vectorValues = mapOf("DOG" to true))) }
+            .isInstanceOf(DomainValidationException::class.java)
+        verify(exactly = 0) { featureRepository.save(any()) }
+    }
 }

@@ -24,11 +24,13 @@ import org.junit.jupiter.api.Test
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
+import ru.a1pha1337.featurify.domain.FeatureVectorElement
 import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.domain.NamespaceAccessToken
 import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
+import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
 import ru.a1pha1337.featurify.repository.FeatureRepository
 import ru.a1pha1337.featurify.repository.NamespaceAccessTokenRepository
@@ -285,5 +287,50 @@ class FeatureGrpcTests {
                 .reason,
         ).isEqualTo("SERVICE_UNAVAILABLE")
         assertThat(error.message!!.contains("private")).isFalse()
+    }
+
+    @Test
+    fun `vector RPC resolves element within authenticated namespace and group`() {
+        val vector =
+            Feature(
+                UUID.randomUUID(),
+                blue.id!!,
+                "feat",
+                FeatureType.VECTOR,
+                groupId = blueGroup.id,
+                version = 4,
+                createdAt = now,
+                updatedAt = now,
+                vectorElements =
+                    mapOf(
+                        "CAT" to FeatureVectorElement(true),
+                        "DOG" to FeatureVectorElement(true),
+                        "SHIP" to FeatureVectorElement(false),
+                    ),
+            )
+        every { features.findByNamespaceIdAndGroupIdAndKey(blue.id!!, blueGroup.id!!, "feat") } returns vector
+        every { features.findByNamespaceIdAndGroupIdAndKey(red.id!!, redGroup.id!!, "feat") } returns
+            vector.copy(
+                namespaceId = red.id!!,
+                groupId = redGroup.id,
+                vectorElements = mapOf("DOG" to FeatureVectorElement(false)),
+            )
+
+        fun vectorRequest(element: String) =
+            GetVectorFeatureRequest
+                .newBuilder()
+                .setGroup("checkout")
+                .setKey("feat")
+                .setElement(element)
+                .build()
+        assertThat(stub().getVectorFeature(vectorRequest("DOG")).value).isTrue()
+        assertThat(stub().getVectorFeature(vectorRequest("SHIP")).value).isFalse()
+        assertThat(stub().getVectorFeature(vectorRequest("CAT")).version).isEqualTo(4)
+        assertThat(stub(redToken).getVectorFeature(vectorRequest("DOG")).value).isFalse()
+        expect(Status.Code.NOT_FOUND) { stub().getVectorFeature(vectorRequest("dog")) }
+        expect(Status.Code.INVALID_ARGUMENT) { stub().getVectorFeature(vectorRequest("")) }
+        expect(Status.Code.UNAUTHENTICATED) { stub(null).getVectorFeature(vectorRequest("DOG")) }
+        expect(Status.Code.FAILED_PRECONDITION) { stub().getVectorFeature(vectorRequest("DOG").toBuilder().setKey("enabled").build()) }
+        expect(Status.Code.FAILED_PRECONDITION) { stub().getBooleanFeature(request(key = "feat")) }
     }
 }

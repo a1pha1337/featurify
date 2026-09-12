@@ -26,7 +26,8 @@ class SecurityConfiguration(
         http: HttpSecurity,
         tokens: AccessTokenService,
     ): SecurityFilterChain {
-        val paths = listOf("/api/v1/features", "/api/v1/features/{key}", "/api/v1/features:resolve")
+        val paths =
+            listOf("/api/v1/features", "/api/v1/features/{key}", "/api/v1/features:resolve", "/api/v1/features/{key}/elements/{element}")
         val matcher = PathPatternRequestMatcher.withDefaults()
         http.securityMatcher(
             OrRequestMatcher(

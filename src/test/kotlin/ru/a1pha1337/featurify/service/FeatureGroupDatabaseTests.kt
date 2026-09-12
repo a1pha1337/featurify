@@ -3,6 +3,7 @@ package ru.a1pha1337.featurify.service
 import com.ninjasquad.springmockk.MockkBean
 import io.mockk.every
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -206,5 +207,52 @@ class FeatureGroupDatabaseTests {
         catchThrowableOfType(org.springframework.dao.DataIntegrityViolationException::class.java) {
             jdbc.execute("TRUNCATE namespace CASCADE")
         }.also { assertThat(it).isNotNull() }
+    }
+
+    @Test
+    fun `vector elements persist independently move with feature and cascade on deletion`() {
+        val namespace = service.createNamespace(CreateNamespaceRequest("vector-${UUID.randomUUID()}", "Vector test"))
+        val feature =
+            service.createFeature(
+                namespace.key,
+                CreateFeatureRequest(
+                    "feat",
+                    FeatureType.VECTOR,
+                    vectorValues = mapOf("CAT" to true, "DOG" to false, "SHIP" to false),
+                ),
+            )
+        val changed =
+            service.patchFeature(
+                namespace.key,
+                feature.key,
+                null,
+                PatchFeatureRequest(feature.version, vectorValues = mapOf("DOG" to true)),
+            )
+        assertThat(service.getFeature(namespace.key, "feat", null).value).isEqualTo(mapOf("CAT" to true, "DOG" to true, "SHIP" to false))
+        assertThatThrownBy {
+            service.patchFeature(
+                namespace.key,
+                "feat",
+                null,
+                PatchFeatureRequest(
+                    feature.version,
+                    vectorValues =
+                        mapOf(
+                            "SHIP" to true,
+                        ),
+                ),
+            )
+        }.isInstanceOf(ConflictException::class.java)
+        assertThat(service.history(namespace.key, "feat", null)).hasSize(1)
+        val group = service.createGroup(namespace.key, CreateFeatureGroupRequest("animals", "Animals"))
+        val moved = service.moveFeature(namespace.key, "feat", null, MoveFeatureRequest(changed.version, group.key))
+        assertThat(service.getVectorElementInNamespace(namespace.id, "feat", group.key, "DOG").value).isTrue()
+        assertThat(service.getVectorElementInNamespace(namespace.id, "feat", group.key, "SHIP").value).isFalse()
+        val id = jdbc.queryForObject("select id from feature where namespace_id = ? and key = 'feat'", UUID::class.java, namespace.id)!!
+        assertThat(
+            jdbc.queryForObject("select count(*) from feature_vector_element where feature_id = ?", Long::class.java, id),
+        ).isEqualTo(3L)
+        service.deleteFeature(namespace.key, "feat", group.key, moved.version)
+        assertThat(jdbc.queryForObject("select count(*) from feature_vector_element where feature_id = ?", Long::class.java, id)).isZero()
     }
 }

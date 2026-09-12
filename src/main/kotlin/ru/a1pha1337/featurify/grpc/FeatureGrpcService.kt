@@ -11,6 +11,7 @@ import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
+import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest
 import ru.a1pha1337.featurify.service.BackendFeatureService
 import ru.a1pha1337.featurify.service.DomainValidationException
 import ru.a1pha1337.featurify.service.NotFoundException
@@ -53,6 +54,25 @@ class FeatureGrpcService(
         EnumFeatureResponse
             .newBuilder()
             .setValue(feature.enumValue!!)
+            .setVersion(feature.version ?: 0)
+            .build()
+    }
+
+    override fun getVectorFeature(
+        request: GetVectorFeatureRequest,
+        observer: StreamObserver<BooleanFeatureResponse>,
+    ) = respond(observer) {
+        if (request.element.isBlank() || request.element.length > 255) {
+            throw DomainValidationException("Invalid element", listOf("element" to "must contain 1-255 characters"))
+        }
+        val feature = features.get(requireNamespace(), request.group, request.key)
+        if (feature.type != FeatureType.VECTOR) {
+            throw GrpcErrors.exception(Status.FAILED_PRECONDITION, "FEATURE_TYPE_MISMATCH", "Feature is not VECTOR")
+        }
+        val element = feature.vectorElements[request.element] ?: throw NotFoundException("Vector element was not found")
+        BooleanFeatureResponse
+            .newBuilder()
+            .setValue(element.enabled)
             .setVersion(feature.version ?: 0)
             .build()
     }
