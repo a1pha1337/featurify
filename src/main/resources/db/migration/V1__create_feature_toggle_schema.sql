@@ -10,7 +10,7 @@ CREATE TABLE namespace
     updated_at     TIMESTAMPTZ  NOT NULL,
     default_namespace BOOLEAN      NOT NULL DEFAULT FALSE,
     CONSTRAINT uq_namespace_key UNIQUE (key),
-    CONSTRAINT ck_namespace_key CHECK (key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'),
+    CONSTRAINT ck_namespace_key CHECK (key ~ '^[A-Za-z]([A-Za-z0-9]|[.-][A-Za-z0-9])*$'),
     CONSTRAINT ck_system_default_namespace CHECK (
         (default_namespace AND key = 'default' AND display_name = 'Default' AND active)
         OR (NOT default_namespace AND key <> 'default')
@@ -68,7 +68,7 @@ CREATE TABLE feature_group
     updated_at   TIMESTAMPTZ  NOT NULL,
     CONSTRAINT uq_feature_group_namespace_key UNIQUE (namespace_id, key),
     CONSTRAINT uq_feature_group_id_namespace UNIQUE (id, namespace_id),
-    CONSTRAINT ck_feature_group_key CHECK (key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')
+    CONSTRAINT ck_feature_group_key CHECK (key ~ '^[A-Za-z]([A-Za-z0-9]|[.-][A-Za-z0-9])*$')
 );
 
 CREATE INDEX ix_feature_group_namespace_key ON feature_group (namespace_id, key);
@@ -88,7 +88,7 @@ CREATE TABLE feature
     updated_at    TIMESTAMPTZ   NOT NULL,
     CONSTRAINT fk_feature_group_namespace FOREIGN KEY (group_id, namespace_id)
         REFERENCES feature_group (id, namespace_id) ON DELETE CASCADE,
-    CONSTRAINT ck_feature_key CHECK (key ~ '^[a-z0-9.-]+$'),
+    CONSTRAINT ck_feature_key CHECK (key ~ '^[A-Za-z]([A-Za-z0-9]|[.-][A-Za-z0-9])*$'),
     CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM')),
     CONSTRAINT ck_feature_typed_value CHECK (
         (type = 'BOOLEAN' AND boolean_value IS NOT NULL AND enum_value IS NULL)

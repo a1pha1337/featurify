@@ -82,6 +82,26 @@ class FeatureToggleServiceTests {
     }
 
     @Test
+    fun `feature creation accepts camel Pascal kebab dotted and digits after first letter`() {
+        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
+            .thenAnswer { it.getArgument<Feature>(0).copy(id = featureId, version = 0) }
+        listOf("camelCase", "PascalCase", "kebab-case", "checkout.payment-provider", "release2").forEach { key ->
+            val created = service.createFeature("blue", CreateFeatureRequest(key, FeatureType.BOOLEAN, booleanValue = true))
+            assertEquals(key, created.key)
+        }
+    }
+
+    @Test
+    fun `feature creation rejects underscore special characters and digit start`() {
+        listOf("snake_case", "with space", "-leading", "trailing-", "with..double", "with.-mixed", "with--double", "2release").forEach { key ->
+            assertThrows(DomainValidationException::class.java) {
+                service.createFeature("blue", CreateFeatureRequest(key, FeatureType.BOOLEAN, booleanValue = true))
+            }
+        }
+        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+    }
+
+    @Test
     fun `stale version is rejected before update`() {
         val feature = booleanFeature(version = 5)
         `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)

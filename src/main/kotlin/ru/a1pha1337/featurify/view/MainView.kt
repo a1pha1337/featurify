@@ -466,7 +466,7 @@ class MainView(
         val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("Create feature")
         refreshGroups()
-        val key = TextField("Key").apply { isRequired = true; maxLength = 255; helperText = "Lowercase letters, digits, dots and hyphens" }
+        val key = TextField("Key").apply { isRequired = true; maxLength = 255; helperText = "camelCase, PascalCase, kebab-case or dotted names; start with a letter" }
         val group = groupPicker("Group").apply {
             value = groupChoices().firstOrNull { it.key == groupSelect.value?.key } ?: globalGroup
         }
@@ -551,7 +551,7 @@ class MainView(
             isRequired = true
             maxLength = 255
             placeholder = "checkout"
-            helperText = "Lowercase letters, digits, dots or hyphens; start and end with a letter or digit"
+            helperText = "camelCase, PascalCase, kebab-case or dotted names; start with a letter"
         }
         val displayName = TextField("Display name").apply { isRequired = true; maxLength = 255; placeholder = "Checkout" }
         dialog.add(form(Paragraph("New group in ${namespace.displayName}"), key, displayName))

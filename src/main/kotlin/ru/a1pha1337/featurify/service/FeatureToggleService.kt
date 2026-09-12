@@ -46,11 +46,12 @@ class FeatureToggleService(
 ) {
     @Transactional
     fun createNamespace(request: CreateNamespaceRequest): NamespaceResponse {
+        val key = normalizeNamespaceKey(request.key)
         val now = clock.instant()
-        if (request.key == "default") throw validation("key", "is reserved for the system Default namespace")
+        if (key == "default") throw validation("key", "is reserved for the system Default namespace")
         return namespaceRepository.save(
             Namespace(
-                key = request.key,
+                key = key,
                 displayName = request.displayName,
                 createdAt = now,
                 updatedAt = now,
@@ -140,6 +141,7 @@ class FeatureToggleService(
     @Transactional
     fun createFeature(namespaceKey: String?, request: CreateFeatureRequest): AdminFeatureResponse {
         val namespace = requireNamespace(namespaceKey)
+        val key = normalizeFeatureKey(request.key)
         val type = request.type ?: throw validation("type", "must not be null")
         val group = normalizeGroup(request.group)?.let { requireGroup(namespace.id!!, it) }
         validateCreation(request, type)
@@ -147,7 +149,7 @@ class FeatureToggleService(
         val saved = featureRepository.save(
             Feature(
                 namespaceId = namespace.id!!,
-                key = request.key,
+                key = key,
                 type = type,
                 groupId = group?.id,
                 booleanValue = request.booleanValue,
@@ -419,7 +421,23 @@ class FeatureToggleService(
     private fun normalizeGroup(group: String?): String? {
         val normalized = group?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         if (normalized.length > 255 || !Regex(ValidationPatterns.FEATURE_GROUP).matches(normalized)) {
-            throw validation("group", "must be a lowercase key containing letters, digits, dots or hyphens")
+            throw validation("group", "must start with a letter and contain only letters, digits, dots or hyphens")
+        }
+        return normalized
+    }
+
+    private fun normalizeNamespaceKey(key: String): String {
+        val normalized = key.trim()
+        if (normalized.length !in 1..255 || !Regex(ValidationPatterns.NAMESPACE_KEY).matches(normalized)) {
+            throw validation("key", "must start with a letter and contain only letters, digits, dots or hyphens")
+        }
+        return normalized
+    }
+
+    private fun normalizeFeatureKey(key: String): String {
+        val normalized = key.trim()
+        if (normalized.length !in 1..255 || !Regex(ValidationPatterns.FEATURE_KEY).matches(normalized)) {
+            throw validation("key", "must start with a letter and contain only letters, digits, dots or hyphens")
         }
         return normalized
     }
