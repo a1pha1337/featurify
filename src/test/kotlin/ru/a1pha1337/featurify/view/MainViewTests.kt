@@ -8,24 +8,14 @@ import com.vaadin.flow.component.dialog.Dialog
 import com.vaadin.flow.component.grid.Grid
 import com.vaadin.flow.component.textfield.TextField
 import com.vaadin.flow.server.VaadinSession
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.validation.Validation
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.RETURNS_DEEP_STUBS
-import org.mockito.Mockito.any
-import org.mockito.Mockito.anyBoolean
-import org.mockito.Mockito.anyString
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.nullable
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.`when`
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import ru.a1pha1337.featurify.domain.FeatureType
@@ -42,8 +32,8 @@ import java.time.Instant
 import java.util.UUID
 
 class MainViewTests {
-    private val accessTokens = mock(ru.a1pha1337.featurify.service.AccessTokenService::class.java)
-    private val service = mock(FeatureToggleService::class.java)
+    private val accessTokens = mockk<ru.a1pha1337.featurify.service.AccessTokenService>(relaxed = true)
+    private val service = mockk<FeatureToggleService>(relaxed = true)
     private val factory = Validation.buildDefaultValidatorFactory()
     private val ui = UI()
     private val now = Instant.parse("2026-09-11T12:00:00Z")
@@ -67,22 +57,21 @@ class MainViewTests {
 
     @BeforeEach
     fun setup() {
-        val session = mock(VaadinSession::class.java, RETURNS_DEEP_STUBS)
-        `when`(session.hasLock()).thenReturn(true)
-        `when`(session.locale).thenReturn(java.util.Locale.ENGLISH)
+        val session = mockk<VaadinSession>(relaxed = true)
+        every { session.hasLock() } returns true
+        every { session.locale } returns java.util.Locale.ENGLISH
         VaadinSession.setCurrent(session)
         ui.internals.session = session
         UI.setCurrent(ui)
-        `when`(service.listNamespaces()).thenReturn(listOf(namespace))
-        `when`(service.listGroups("blue")).thenAnswer { groups.toList() }
-        // Default answer avoids nullable Mockito matchers crossing Kotlin's non-null parameters.
-        doAnswer { invocation ->
-            val page = invocation.getArgument<Pageable>(1)
-            val group = invocation.getArgument<String?>(3)
-            val global = invocation.getArgument<Boolean>(4)
+        every { service.listNamespaces() } returns listOf(namespace)
+        every { service.listGroups("blue") } answers { groups.toList() }
+        every { service.listForAdmin(eq("blue"), any(), any(), any(), any()) } answers {
+            val page = arg<Pageable>(1)
+            val group = arg<String?>(3)
+            val global = arg<Boolean>(4)
             val visible = if (global) feature.group == null else group == null || feature.group == group
             PageImpl(if (visible) listOf(feature) else emptyList(), page, if (visible) 1 else 0)
-        }.`when`(service).listForAdmin(eq("blue"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean())
+        }
         view = MainView(service, factory.validator, accessTokens)
         ui.add(view)
     }
@@ -99,11 +88,10 @@ class MainViewTests {
         button(view, "New namespace").click()
         val dialog = dialog()
 
-        assertTrue(components(dialog).filterIsInstance<com.vaadin.flow.component.checkbox.Checkbox>().isEmpty())
-        assertEquals(
-            setOf("Namespace key", "Display name"),
+        assertThat(components(dialog).filterIsInstance<com.vaadin.flow.component.checkbox.Checkbox>().isEmpty()).isTrue()
+        assertThat(
             components(dialog).filterIsInstance<TextField>().map { it.label }.toSet(),
-        )
+        ).isEqualTo(setOf("Namespace key", "Display name"))
     }
 
     @Test
@@ -111,10 +99,10 @@ class MainViewTests {
         button(view, "New group").click()
         val dialog = dialog()
         button(dialog, "Create group").click()
-        assertTrue(field(dialog, "Group key").isInvalid)
-        verify(service, never()).createGroup(anyString(), anyRequest())
+        assertThat(field(dialog, "Group key").isInvalid).isTrue()
+        verify(exactly = 0) { service.createGroup(any(), any()) }
         val created = source.copy(id = UUID.randomUUID(), key = "payments", displayName = "Payments")
-        `when`(service.createGroup("blue", CreateFeatureGroupRequest("payments", "Payments"))).thenAnswer {
+        every { service.createGroup("blue", CreateFeatureGroupRequest("payments", "Payments")) } answers {
             groups.add(created)
             created
         }
@@ -123,26 +111,26 @@ class MainViewTests {
 
         button(dialog, "Create group").click()
 
-        verify(service).createGroup("blue", CreateFeatureGroupRequest("payments", "Payments"))
-        assertFalse(dialog.isOpened)
-        assertEquals("Payments (payments)", selectedLabel(combo(view, "Group")))
-        assertTrue(button(view, "New group").isEnabled)
+        verify(exactly = 1) { service.createGroup("blue", CreateFeatureGroupRequest("payments", "Payments")) }
+        assertThat(dialog.isOpened).isFalse()
+        assertThat(selectedLabel(combo(view, "Group"))).isEqualTo("Payments (payments)")
+        assertThat(button(view, "New group").isEnabled).isTrue()
     }
 
     @Test
     fun `move uses selected feature source and version and follows target filter`() {
         choose(combo(view, "Group"), "Source (source)")
         grid().select(feature)
-        assertTrue(button(view, "Edit").isEnabled)
-        `when`(
+        assertThat(button(view, "Edit").isEnabled).isTrue()
+        every {
             service.editFeature(
                 "blue",
                 feature.key,
                 "source",
                 "target",
                 PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
-            ),
-        ).thenAnswer {
+            )
+        } answers {
             feature = feature.copy(group = "target", version = 8)
             feature
         }
@@ -152,96 +140,94 @@ class MainViewTests {
 
         button(dialog, "Save").click()
 
-        verify(
-            service,
-        ).editFeature(
-            "blue",
-            feature.key,
-            "source",
-            "target",
-            PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
-        )
-        assertFalse(dialog.isOpened)
-        assertEquals("Target (target)", selectedLabel(combo(view, "Group")))
-        assertFalse(button(view, "Edit").isEnabled)
-    }
-
-    @Test
-    fun `move to Global is explicit`() {
-        grid().select(feature)
-        `when`(
-            service.editFeature(
-                "blue",
-                feature.key,
-                "source",
-                null,
-                PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
-            ),
-        ).thenAnswer {
-            feature = feature.copy(group = null, version = 8)
-            feature
-        }
-        button(view, "Edit").click()
-        val dialog = dialog()
-        val picker = combo(dialog, "Group")
-        assertEquals(3, picker.listDataView.itemCount)
-        choose(picker, "Global")
-
-        button(dialog, "Save").click()
-
-        verify(
-            service,
-        ).editFeature(
-            "blue",
-            feature.key,
-            "source",
-            null,
-            PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
-        )
-        assertEquals("All groups", selectedLabel(combo(view, "Group")))
-    }
-
-    @Test
-    fun `switching namespace clears selection and keeps group creation enabled`() {
-        val other =
-            namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
-        `when`(service.listGroups("other")).thenReturn(emptyList())
-        `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
-            .thenReturn(PageImpl(emptyList()))
-        grid().select(feature)
-        val namespaces = combo(view, "Namespace")
-        namespaces.setItems(listOf(namespace, other))
-        namespaces.value = other
-
-        assertTrue(button(view, "New group").isEnabled)
-        assertFalse(button(view, "Edit").isEnabled)
-        assertEquals("All groups", selectedLabel(combo(view, "Group")))
-        assertEquals(2, combo(view, "Group").listDataView.itemCount)
-    }
-
-    @Test
-    fun `failed move keeps dialog open for correction`() {
-        grid().select(feature)
-        `when`(
+        verify(exactly = 1) {
             service.editFeature(
                 "blue",
                 feature.key,
                 "source",
                 "target",
                 PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
-            ),
-        ).thenThrow(
+            )
+        }
+        assertThat(dialog.isOpened).isFalse()
+        assertThat(selectedLabel(combo(view, "Group"))).isEqualTo("Target (target)")
+        assertThat(button(view, "Edit").isEnabled).isFalse()
+    }
+
+    @Test
+    fun `move to Global is explicit`() {
+        grid().select(feature)
+        every {
+            service.editFeature(
+                "blue",
+                feature.key,
+                "source",
+                null,
+                PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+            )
+        } answers {
+            feature = feature.copy(group = null, version = 8)
+            feature
+        }
+        button(view, "Edit").click()
+        val dialog = dialog()
+        val picker = combo(dialog, "Group")
+        assertThat(picker.listDataView.itemCount).isEqualTo(3)
+        choose(picker, "Global")
+
+        button(dialog, "Save").click()
+
+        verify(exactly = 1) {
+            service.editFeature(
+                "blue",
+                feature.key,
+                "source",
+                null,
+                PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+            )
+        }
+        assertThat(selectedLabel(combo(view, "Group"))).isEqualTo("All groups")
+    }
+
+    @Test
+    fun `switching namespace clears selection and keeps group creation enabled`() {
+        val other =
+            namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
+        every { service.listGroups("other") } returns emptyList()
+        every { service.listForAdmin(eq("other"), any(), any(), any(), any()) } returns PageImpl(emptyList())
+        grid().select(feature)
+        val namespaces = combo(view, "Namespace")
+        namespaces.setItems(listOf(namespace, other))
+        namespaces.value = other
+
+        assertThat(button(view, "New group").isEnabled).isTrue()
+        assertThat(button(view, "Edit").isEnabled).isFalse()
+        assertThat(selectedLabel(combo(view, "Group"))).isEqualTo("All groups")
+        assertThat(combo(view, "Group").listDataView.itemCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `failed move keeps dialog open for correction`() {
+        grid().select(feature)
+        every {
+            service.editFeature(
+                "blue",
+                feature.key,
+                "source",
+                "target",
+                PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true),
+            )
+        } throws
             ru.a1pha1337.featurify.service
-                .ConflictException("Target already contains this key"),
-        )
+                .ConflictException("Target already contains this key")
         button(view, "Edit").click()
         val dialog = dialog()
         choose(combo(dialog, "Group"), "Target (target)")
 
         button(dialog, "Save").click()
 
-        assertTrue(dialog.isOpened)
-        assertEquals("Target (target)", selectedLabel(combo(dialog, "Group")))
+        assertThat(dialog.isOpened).isTrue()
+        assertThat(selectedLabel(combo(dialog, "Group"))).isEqualTo("Target (target)")
     }
 
     @Test
@@ -250,47 +236,46 @@ class MainViewTests {
         button(view, "Delete").click()
         val cancelled = dialog()
         button(cancelled, "Cancel").click()
-        verify(service, never()).deleteFeature("blue", feature.key, feature.group, feature.version)
+        verify(exactly = 0) { service.deleteFeature("blue", feature.key, feature.group, feature.version) }
         button(view, "Delete").click()
         val confirmed = dialog()
         button(confirmed, "Delete").click()
-        verify(service).deleteFeature("blue", feature.key, feature.group, feature.version)
-        assertFalse(confirmed.isOpened)
-        assertFalse(button(view, "Delete").isEnabled)
+        verify(exactly = 1) { service.deleteFeature("blue", feature.key, feature.group, feature.version) }
+        assertThat(confirmed.isOpened).isFalse()
+        assertThat(button(view, "Delete").isEnabled).isFalse()
     }
 
     @Test
     fun `default namespace deletion is disabled`() {
-        assertFalse(button(view, "Delete namespace").isEnabled)
+        assertThat(button(view, "Delete namespace").isEnabled).isFalse()
     }
 
     @Test
     fun `namespace deletion confirms cascade and selects default afterwards`() {
         val other =
             namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
-        `when`(service.listGroups("other")).thenReturn(emptyList())
-        `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
-            .thenReturn(PageImpl(emptyList()))
+        every { service.listGroups("other") } returns emptyList()
+        every { service.listForAdmin(eq("other"), any(), any(), any(), any()) } returns PageImpl(emptyList())
         val namespaces = combo(view, "Namespace")
         namespaces.setItems(listOf(namespace, other))
         namespaces.value = other
-        assertTrue(button(view, "Delete namespace").isEnabled)
+        assertThat(button(view, "Delete namespace").isEnabled).isTrue()
         button(view, "Delete namespace").click()
         val confirmation = dialog()
-        verify(service, never()).deleteNamespace("other")
+        verify(exactly = 0) { service.deleteNamespace("other") }
         button(confirmation, "Delete namespace").click()
-        verify(service).deleteNamespace("other")
-        assertFalse(confirmation.isOpened)
-        assertEquals(namespace, namespaces.value)
-        assertFalse(button(view, "Delete namespace").isEnabled)
+        verify(exactly = 1) { service.deleteNamespace("other") }
+        assertThat(confirmation.isOpened).isFalse()
+        assertThat(namespaces.value).isEqualTo(namespace)
+        assertThat(button(view, "Delete namespace").isEnabled).isFalse()
     }
 
     @Test
     fun `toolbar has no move action and edit contains group picker`() {
-        assertFalse(components(view).filterIsInstance<Button>().any { it.text == "Move to group" })
+        assertThat(components(view).filterIsInstance<Button>().any { it.text == "Move to group" }).isFalse()
         grid().select(feature)
         button(view, "Edit").click()
-        assertEquals("Source (source)", selectedLabel(combo(dialog(), "Group")))
+        assertThat(selectedLabel(combo(dialog(), "Group"))).isEqualTo("Source (source)")
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -301,28 +286,26 @@ class MainViewTests {
     @Test
     fun `inline switch saves value and uses new version for subsequent changes`() {
         val toggle = valueEditor() as Button
-        assertEquals("true", toggle.element.getAttribute("aria-checked"))
-        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, booleanValue = false)))
-            .thenReturn(feature.copy(value = false, version = 8))
-        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, booleanValue = true)))
-            .thenReturn(feature.copy(value = true, version = 9))
+        assertThat(toggle.element.getAttribute("aria-checked")).isEqualTo("true")
+        every { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, booleanValue = false)) } returns
+            feature.copy(value = false, version = 8)
+        every { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, booleanValue = true)) } returns
+            feature.copy(value = true, version = 9)
         toggle.click()
-        assertEquals("false", toggle.element.getAttribute("aria-checked"))
+        assertThat(toggle.element.getAttribute("aria-checked")).isEqualTo("false")
         toggle.click()
-        verify(service).patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, booleanValue = true))
-        assertEquals("true", toggle.element.getAttribute("aria-checked"))
+        verify(exactly = 1) { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, booleanValue = true)) }
+        assertThat(toggle.element.getAttribute("aria-checked")).isEqualTo("true")
     }
 
     @Test
     fun `failed inline switch leaves persisted value displayed`() {
         val toggle = valueEditor() as Button
-        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, booleanValue = false)))
-            .thenThrow(
-                ru.a1pha1337.featurify.service
-                    .ConflictException("Stale version"),
-            )
+        every { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, booleanValue = false)) } throws
+            ru.a1pha1337.featurify.service
+                .ConflictException("Stale version")
         toggle.click()
-        assertEquals("true", toggle.element.getAttribute("aria-checked"))
+        assertThat(toggle.element.getAttribute("aria-checked")).isEqualTo("true")
     }
 
     @Test
@@ -330,28 +313,26 @@ class MainViewTests {
     fun `inline enum saves client changes and rolls back failed selection`() {
         feature = feature.copy(type = FeatureType.ENUM, value = "a", enumOptions = listOf("a", "b"))
         val picker = valueEditor() as ComboBox<String>
-        assertEquals(listOf("a", "b"), picker.listDataView.items.toList())
-        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, enumValue = "b")))
-            .thenReturn(feature.copy(value = "b", version = 8))
+        assertThat(picker.listDataView.items.toList()).isEqualTo(listOf("a", "b"))
+        every { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, enumValue = "b")) } returns
+            feature.copy(value = "b", version = 8)
         picker.value = "b"
         com.vaadin.flow.component.ComponentUtil.fireEvent(
             picker,
             com.vaadin.flow.component.AbstractField
                 .ComponentValueChangeEvent(picker, picker, "a", true),
         )
-        assertEquals("b", picker.value)
-        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, enumValue = "a")))
-            .thenThrow(
-                ru.a1pha1337.featurify.service
-                    .ConflictException("Stale version"),
-            )
+        assertThat(picker.value).isEqualTo("b")
+        every { service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, enumValue = "a")) } throws
+            ru.a1pha1337.featurify.service
+                .ConflictException("Stale version")
         picker.value = "a"
         com.vaadin.flow.component.ComponentUtil.fireEvent(
             picker,
             com.vaadin.flow.component.AbstractField
                 .ComponentValueChangeEvent(picker, picker, "b", true),
         )
-        assertEquals("b", picker.value)
+        assertThat(picker.value).isEqualTo("b")
     }
 
     @Test
@@ -376,44 +357,46 @@ class MainViewTests {
         combo(dialog, "Current enum value").value = "French"
         add("Italian")
         add("French")
-        assertEquals("French", combo(dialog, "Current enum value").value)
-        assertEquals(3, tags.value.size)
+        assertThat(combo(dialog, "Current enum value").value).isEqualTo("French")
+        assertThat(tags.value.size).isEqualTo(3)
         tags.value = linkedSetOf("English", "Italian")
-        assertEquals("English", combo(dialog, "Current enum value").value)
+        assertThat(combo(dialog, "Current enum value").value).isEqualTo("English")
         add(" ")
-        assertTrue(tags.isInvalid)
+        assertThat(tags.isInvalid).isTrue()
         add("Italian")
         button(dialog, "Create").click()
-        verify(service).createFeature(
-            "blue",
-            CreateFeatureRequest(
-                key = "language",
-                type = FeatureType.ENUM,
-                enumValue = "English",
-                enumOptions = listOf("English", "Italian"),
-            ),
-        )
+        verify(exactly = 1) {
+            service.createFeature(
+                "blue",
+                CreateFeatureRequest(
+                    key = "language",
+                    type = FeatureType.ENUM,
+                    enumValue = "English",
+                    enumOptions = listOf("English", "Italian"),
+                ),
+            )
+        }
     }
 
     @Test
     fun `access token is generated for selected namespace and cleared on dialog close`() {
-        `when`(accessTokens.list("blue")).thenReturn(emptyList())
+        every { accessTokens.list("blue") } returns emptyList()
         button(view, "Access tokens").click()
         val dialog = dialog()
         button(dialog, "Generate token").click()
-        assertTrue(field(dialog, "Token name").isInvalid)
+        assertThat(field(dialog, "Token name").isInvalid).isTrue()
         val id = UUID.randomUUID()
-        `when`(accessTokens.create("blue", CreateAccessTokenRequest("backend")))
-            .thenReturn(CreatedAccessTokenResponse(id, "backend", now, "test-only-secret"))
+        every { accessTokens.create("blue", CreateAccessTokenRequest("backend")) } returns
+            CreatedAccessTokenResponse(id, "backend", now, "test-only-secret")
         field(dialog, "Token name").value = "backend"
         button(dialog, "Generate token").click()
-        verify(accessTokens).create("blue", CreateAccessTokenRequest("backend"))
+        verify(exactly = 1) { accessTokens.create("blue", CreateAccessTokenRequest("backend")) }
         val secret = components(dialog).filterIsInstance<com.vaadin.flow.component.textfield.TextArea>().single()
-        assertTrue(secret.isVisible)
-        assertTrue(secret.isReadOnly)
-        assertEquals("test-only-secret", secret.value)
+        assertThat(secret.isVisible).isTrue()
+        assertThat(secret.isReadOnly).isTrue()
+        assertThat(secret.value).isEqualTo("test-only-secret")
         button(dialog, "Close").click()
-        assertEquals("", secret.value)
+        assertThat(secret.value).isEqualTo("")
     }
 
     private fun components(root: Component): List<Component> =
@@ -469,12 +452,4 @@ class MainViewTests {
                 .toList()
                 .single { combo.itemLabelGenerator.apply(it) == label }
     }
-
-    private fun anyPage(): Pageable =
-        any(Pageable::class.java) ?: org.springframework.data.domain.PageRequest
-            .of(0, 20)
-
-    private fun nullableQuery(): String? = nullable(String::class.java)
-
-    private fun anyRequest(): CreateFeatureGroupRequest = any(CreateFeatureGroupRequest::class.java) ?: CreateFeatureGroupRequest("", "")
 }

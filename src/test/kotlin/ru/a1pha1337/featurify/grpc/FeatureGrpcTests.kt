@@ -12,20 +12,15 @@ import io.grpc.inprocess.InProcessChannelBuilder
 import io.grpc.inprocess.InProcessServerBuilder
 import io.grpc.protobuf.StatusProto
 import io.grpc.stub.MetadataUtils
+import io.mockk.Called
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotEquals
-import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when`
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
@@ -49,10 +44,10 @@ import java.util.concurrent.TimeUnit
 
 class FeatureGrpcTests {
     private val now = Instant.now()
-    private val namespaces = mock(NamespaceRepository::class.java)
-    private val tokenRepository = mock(NamespaceAccessTokenRepository::class.java)
-    private val groups = mock(FeatureGroupRepository::class.java)
-    private val features = mock(FeatureRepository::class.java)
+    private val namespaces = mockk<NamespaceRepository>(relaxed = true)
+    private val tokenRepository = mockk<NamespaceAccessTokenRepository>(relaxed = true)
+    private val groups = mockk<FeatureGroupRepository>(relaxed = true)
+    private val features = mockk<FeatureRepository>(relaxed = true)
     private val tokenRows = mutableMapOf<UUID, NamespaceAccessToken>()
     private val blue = Namespace(UUID.randomUUID(), "blue", "Blue", true, now, now)
     private val red = blue.copy(id = UUID.randomUUID(), key = "red")
@@ -67,20 +62,25 @@ class FeatureGrpcTests {
 
     @BeforeEach
     fun start() {
-        `when`(namespaces.findByKey("blue")).thenReturn(blue)
-        `when`(namespaces.findByKey("red")).thenReturn(red)
-        `when`(namespaces.findById(blue.id!!)).thenReturn(Optional.of(blue))
-        `when`(namespaces.findById(red.id!!)).thenReturn(Optional.of(red))
-        `when`(tokenRepository.save(any(NamespaceAccessToken::class.java))).thenAnswer {
-            val saved = it.getArgument<NamespaceAccessToken>(0).copy(id = UUID.randomUUID())
+        every { namespaces.findByKey(any()) } returns null
+        every { groups.findByNamespaceIdAndKey(any(), any()) } returns null
+        every { features.findByNamespaceIdAndGroupIdIsNullAndKey(any(), any()) } returns null
+        every { features.findByNamespaceIdAndGroupIdAndKey(any(), any(), any()) } returns null
+        every { tokenRepository.findByIdAndNamespaceId(any(), any()) } returns null
+        every { namespaces.findByKey("blue") } returns blue
+        every { namespaces.findByKey("red") } returns red
+        every { namespaces.findById(blue.id!!) } returns Optional.of(blue)
+        every { namespaces.findById(red.id!!) } returns Optional.of(red)
+        every { tokenRepository.save(any<NamespaceAccessToken>()) } answers {
+            val saved = arg<NamespaceAccessToken>(0).copy(id = UUID.randomUUID())
             tokenRows[saved.id!!] = saved
             saved
         }
-        `when`(tokenRepository.findById(any(UUID::class.java))).thenAnswer {
-            Optional.ofNullable(tokenRows[it.getArgument<UUID>(0)])
+        every { tokenRepository.findById(any<UUID>()) } answers {
+            Optional.ofNullable(tokenRows[arg<UUID>(0)])
         }
-        `when`(groups.findByNamespaceIdAndKey(blue.id!!, "checkout")).thenReturn(blueGroup)
-        `when`(groups.findByNamespaceIdAndKey(red.id!!, "checkout")).thenReturn(redGroup)
+        every { groups.findByNamespaceIdAndKey(blue.id!!, "checkout") } returns blueGroup
+        every { groups.findByNamespaceIdAndKey(red.id!!, "checkout") } returns redGroup
         val flag =
             Feature(
                 UUID.randomUUID(),
@@ -93,18 +93,16 @@ class FeatureGrpcTests {
                 createdAt = now,
                 updatedAt = now,
             )
-        `when`(features.findByNamespaceIdAndGroupIdAndKey(blue.id!!, blueGroup.id!!, "enabled")).thenReturn(flag)
-        `when`(features.findByNamespaceIdAndGroupIdAndKey(red.id!!, redGroup.id!!, "enabled"))
-            .thenReturn(flag.copy(namespaceId = red.id!!, groupId = redGroup.id, booleanValue = true))
-        `when`(features.findByNamespaceIdAndGroupIdIsNullAndKey(blue.id!!, "color"))
-            .thenReturn(
-                flag.copy(
-                    key = "color",
-                    groupId = null,
-                    type = FeatureType.ENUM,
-                    booleanValue = null,
-                    enumValue = "GREEN",
-                ),
+        every { features.findByNamespaceIdAndGroupIdAndKey(blue.id!!, blueGroup.id!!, "enabled") } returns flag
+        every { features.findByNamespaceIdAndGroupIdAndKey(red.id!!, redGroup.id!!, "enabled") } returns
+            flag.copy(namespaceId = red.id!!, groupId = redGroup.id, booleanValue = true)
+        every { features.findByNamespaceIdAndGroupIdIsNullAndKey(blue.id!!, "color") } returns
+            flag.copy(
+                key = "color",
+                groupId = null,
+                type = FeatureType.ENUM,
+                booleanValue = null,
+                enumValue = "GREEN",
             )
         tokenService = AccessTokenService(tokenRepository, namespaces, Clock.systemUTC())
         blueToken = tokenService.create("blue", CreateAccessTokenRequest("backend")).token
@@ -154,17 +152,21 @@ class FeatureGrpcTests {
         code: Status.Code,
         action: () -> Unit,
     ) {
-        assertEquals(code, assertThrows(StatusRuntimeException::class.java, action).status.code)
+        assertThat(
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                action()
+            }.also { assertThat(it).isNotNull() }.status.code,
+        ).isEqualTo(code)
     }
 
     @Test
     fun `token selects namespace even for identical group and feature keys`() {
-        assertFalse(stub().getBooleanFeature(request()).value)
-        assertEquals(7, stub().getBooleanFeature(request()).version)
-        assertTrue(stub(redToken).getBooleanFeature(request()).value)
+        assertThat(stub().getBooleanFeature(request()).value).isFalse()
+        assertThat(stub().getBooleanFeature(request()).version).isEqualTo(7)
+        assertThat(stub(redToken).getBooleanFeature(request()).value).isTrue()
         val spoofed = Metadata().apply { put(Metadata.Key.of("namespace", Metadata.ASCII_STRING_MARSHALLER), "red") }
-        assertFalse(stub(blueToken, spoofed).getBooleanFeature(request()).value)
-        assertEquals("GREEN", stub().getEnumFeature(request("", "color")).value)
+        assertThat(stub(blueToken, spoofed).getBooleanFeature(request()).value).isFalse()
+        assertThat(stub().getEnumFeature(request("", "color")).value).isEqualTo("GREEN")
         expect(Status.Code.NOT_FOUND) { stub(redToken).getEnumFeature(request("", "color")) }
     }
 
@@ -176,18 +178,18 @@ class FeatureGrpcTests {
         expect(Status.Code.UNAUTHENTICATED) { stub(altered).getBooleanFeature(request()) }
         val duplicates = Metadata().apply { put(TokenAuthenticationInterceptor.AUTHORIZATION, "Bearer $redToken") }
         expect(Status.Code.UNAUTHENTICATED) { stub(blueToken, duplicates).getBooleanFeature(request()) }
-        verifyNoInteractions(features)
+        verify { features wasNot Called }
     }
 
     @Test
     fun `deleted tokens and inactive or deleted namespaces cannot authenticate`() {
         tokenRows.remove(UUID.fromString(blueToken.substringAfter("ft_").substringBefore('.')))
         expect(Status.Code.UNAUTHENTICATED) { stub().getBooleanFeature(request()) }
-        `when`(namespaces.findById(red.id!!)).thenReturn(Optional.of(red.copy(active = false)))
+        every { namespaces.findById(red.id!!) } returns Optional.of(red.copy(active = false))
         expect(Status.Code.UNAUTHENTICATED) { stub(redToken).getBooleanFeature(request()) }
-        `when`(namespaces.findById(red.id!!)).thenReturn(Optional.empty())
+        every { namespaces.findById(red.id!!) } returns Optional.empty()
         expect(Status.Code.UNAUTHENTICATED) { stub(redToken).getBooleanFeature(request()) }
-        verifyNoInteractions(features)
+        verify { features wasNot Called }
     }
 
     @Test
@@ -203,78 +205,85 @@ class FeatureGrpcTests {
     @Test
     fun `multiple namespace tokens are independent and only bcrypt hashes are stored`() {
         val extra = tokenService.create("blue", CreateAccessTokenRequest("second backend"))
-        assertNotEquals(blueToken, extra.token)
-        assertEquals(blue.id, tokenService.authenticate(extra.token))
-        assertEquals(blue.id, tokenService.authenticate(blueToken))
+        assertThat(extra.token).isNotEqualTo(blueToken)
+        assertThat(tokenService.authenticate(extra.token)).isEqualTo(blue.id)
+        assertThat(tokenService.authenticate(blueToken)).isEqualTo(blue.id)
         val row = tokenRows[extra.id]!!
-        assertEquals(60, row.tokenHash.length)
-        assertNotEquals(extra.token, row.tokenHash)
-        assertFalse(row.toString().contains(row.tokenHash))
-        assertFalse(extra.toString().contains(extra.token))
-        assertTrue(
+        assertThat(row.tokenHash.length).isEqualTo(60)
+        assertThat(row.tokenHash).isNotEqualTo(extra.token)
+        assertThat(row.toString().contains(row.tokenHash)).isFalse()
+        assertThat(extra.toString().contains(extra.token)).isFalse()
+        assertThat(
             org.springframework.security.crypto.bcrypt
                 .BCryptPasswordEncoder()
                 .matches(extra.token.substringAfter('.'), row.tokenHash),
-        )
-        `when`(tokenRepository.findByIdAndNamespaceId(extra.id, blue.id!!)).thenReturn(row)
-        doAnswer {
-            tokenRows.remove(it.getArgument<NamespaceAccessToken>(0).id)
-            null
-        }.`when`(tokenRepository).delete(row)
+        ).isTrue()
+        every { tokenRepository.findByIdAndNamespaceId(extra.id, blue.id!!) } returns row
+        every { tokenRepository.delete(row) } answers {
+            tokenRows.remove(arg<NamespaceAccessToken>(0).id)
+            Unit
+        }
         tokenService.revoke("blue", extra.id)
-        assertNull(tokenService.authenticate(extra.token))
-        assertEquals(blue.id, tokenService.authenticate(blueToken))
-        assertThrows(NotFoundException::class.java) { tokenService.revoke("red", extra.id) }
+        assertThat(tokenService.authenticate(extra.token)).isNull()
+        assertThat(tokenService.authenticate(blueToken)).isEqualTo(blue.id)
+        catchThrowableOfType(NotFoundException::class.java) { tokenService.revoke("red", extra.id) }.also { assertThat(it).isNotNull() }
     }
 
     @Test
     fun `rich errors carry standard status error info and validation fields`() {
-        val invalid = assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request(key = "")) }
+        val invalid =
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub().getBooleanFeature(request(key = ""))
+            }.also { assertThat(it).isNotNull() }
         val detail = StatusProto.fromThrowable(invalid)!!
-        assertEquals(Status.Code.INVALID_ARGUMENT.value(), detail.code)
+        assertThat(detail.code).isEqualTo(Status.Code.INVALID_ARGUMENT.value())
         val info = detail.detailsList.first { it.`is`(ErrorInfo::class.java) }.unpack(ErrorInfo::class.java)
-        assertEquals("featurify", info.domain)
-        assertEquals("VALIDATION_ERROR", info.reason)
+        assertThat(info.domain).isEqualTo("featurify")
+        assertThat(info.reason).isEqualTo("VALIDATION_ERROR")
         val fields = detail.detailsList.first { it.`is`(BadRequest::class.java) }.unpack(BadRequest::class.java)
-        assertEquals("key", fields.fieldViolationsList.single().field)
-        val unauthorized = assertThrows(StatusRuntimeException::class.java) { stub(null).getBooleanFeature(request()) }
-        assertEquals(
-            "UNAUTHORIZED",
+        assertThat(fields.fieldViolationsList.single().field).isEqualTo("key")
+        val unauthorized =
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub(null).getBooleanFeature(request())
+            }.also { assertThat(it).isNotNull() }
+        assertThat(
             StatusProto
                 .fromThrowable(unauthorized)!!
                 .detailsList
                 .single()
                 .unpack(ErrorInfo::class.java)
                 .reason,
-        )
-        val mismatch = assertThrows(StatusRuntimeException::class.java) { stub().getEnumFeature(request()) }
-        assertEquals(
-            "FEATURE_TYPE_MISMATCH",
+        ).isEqualTo("UNAUTHORIZED")
+        val mismatch =
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub().getEnumFeature(request())
+            }.also { assertThat(it).isNotNull() }
+        assertThat(
             StatusProto
                 .fromThrowable(mismatch)!!
                 .detailsList
                 .single()
                 .unpack(ErrorInfo::class.java)
                 .reason,
-        )
+        ).isEqualTo("FEATURE_TYPE_MISMATCH")
     }
 
     @Test
     fun `authentication storage failure is unavailable with safe rich details`() {
-        `when`(
-            tokenRepository.findById(any(UUID::class.java)),
-        ).thenThrow(org.springframework.dao.DataAccessResourceFailureException("private"))
-        val error = assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request()) }
-        assertEquals(Status.Code.UNAVAILABLE, error.status.code)
-        assertEquals(
-            "SERVICE_UNAVAILABLE",
+        every { tokenRepository.findById(any<UUID>()) } throws org.springframework.dao.DataAccessResourceFailureException("private")
+        val error =
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub().getBooleanFeature(request())
+            }.also { assertThat(it).isNotNull() }
+        assertThat(error.status.code).isEqualTo(Status.Code.UNAVAILABLE)
+        assertThat(
             StatusProto
                 .fromThrowable(error)!!
                 .detailsList
                 .single()
                 .unpack(ErrorInfo::class.java)
                 .reason,
-        )
-        assertFalse(error.message!!.contains("private"))
+        ).isEqualTo("SERVICE_UNAVAILABLE")
+        assertThat(error.message!!.contains("private")).isFalse()
     }
 }

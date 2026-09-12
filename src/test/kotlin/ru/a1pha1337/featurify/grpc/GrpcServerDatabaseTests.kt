@@ -9,11 +9,9 @@ import io.grpc.StatusRuntimeException
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import io.grpc.protobuf.StatusProto
 import io.grpc.stub.MetadataUtils
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -86,47 +84,48 @@ open class GrpcServerDatabaseTests {
     fun `auto configured server enforces namespace tokens and immediate revocation`() {
         val (blue, blueToken) = namespace(false)
         val (_, redToken) = namespace(true)
-        assertFalse(stub(blueToken.token).getBooleanFeature(request()).value)
-        assertTrue(stub(redToken.token).getBooleanFeature(request()).value)
-        assertEquals(
-            Status.Code.UNAUTHENTICATED,
-            assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request()) }.status.code,
-        )
+        assertThat(stub(blueToken.token).getBooleanFeature(request()).value).isFalse()
+        assertThat(stub(redToken.token).getBooleanFeature(request()).value).isTrue()
+        assertThat(
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub().getBooleanFeature(request())
+            }.also { assertThat(it).isNotNull() }.status.code,
+        ).isEqualTo(Status.Code.UNAUTHENTICATED)
         tokens.revoke(blue, blueToken.id)
-        assertEquals(
-            Status.Code.UNAUTHENTICATED,
-            assertThrows(StatusRuntimeException::class.java) { stub(blueToken.token).getBooleanFeature(request()) }.status.code,
-        )
-        assertTrue(stub(redToken.token).getBooleanFeature(request()).value)
+        assertThat(
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub(blueToken.token).getBooleanFeature(request())
+            }.also { assertThat(it).isNotNull() }.status.code,
+        ).isEqualTo(Status.Code.UNAUTHENTICATED)
+        assertThat(stub(redToken.token).getBooleanFeature(request()).value).isTrue()
     }
 
     @Test
     fun `auto configured server preserves inbound message limit`() {
         val (_, token) = namespace(true)
-        assertEquals(
-            Status.Code.RESOURCE_EXHAUSTED,
-            assertThrows(StatusRuntimeException::class.java) {
+        assertThat(
+            catchThrowableOfType(StatusRuntimeException::class.java) {
                 stub(token.token).getBooleanFeature(request("a".repeat(17 * 1024)))
-            }.status.code,
-        )
+            }.also { assertThat(it).isNotNull() }.status.code,
+        ).isEqualTo(Status.Code.RESOURCE_EXHAUSTED)
     }
 
     @Test
     fun `standard rich error details reach clients through Spring transport`() {
         val (_, token) = namespace(true)
         val invalid =
-            assertThrows(StatusRuntimeException::class.java) { stub(token.token).getBooleanFeature(request("")) }
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub(token.token).getBooleanFeature(request(""))
+            }.also { assertThat(it).isNotNull() }
         val status = StatusProto.fromThrowable(invalid)!!
-        assertEquals(Status.Code.INVALID_ARGUMENT.value(), status.code)
-        assertEquals(
-            "VALIDATION_ERROR",
+        assertThat(status.code).isEqualTo(Status.Code.INVALID_ARGUMENT.value())
+        assertThat(
             status.detailsList
                 .first { it.`is`(ErrorInfo::class.java) }
                 .unpack(ErrorInfo::class.java)
                 .reason,
-        )
-        assertEquals(
-            "key",
+        ).isEqualTo("VALIDATION_ERROR")
+        assertThat(
             status.detailsList
                 .first {
                     it.`is`(BadRequest::class.java)
@@ -134,16 +133,18 @@ open class GrpcServerDatabaseTests {
                 .fieldViolationsList
                 .single()
                 .field,
-        )
-        val unauthorized = assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request()) }
-        assertEquals(
-            "UNAUTHORIZED",
+        ).isEqualTo("key")
+        val unauthorized =
+            catchThrowableOfType(StatusRuntimeException::class.java) {
+                stub().getBooleanFeature(request())
+            }.also { assertThat(it).isNotNull() }
+        assertThat(
             StatusProto
                 .fromThrowable(unauthorized)!!
                 .detailsList
                 .single()
                 .unpack(ErrorInfo::class.java)
                 .reason,
-        )
+        ).isEqualTo("UNAUTHORIZED")
     }
 }

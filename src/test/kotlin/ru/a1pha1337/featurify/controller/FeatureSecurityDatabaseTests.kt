@@ -1,5 +1,6 @@
 package ru.a1pha1337.featurify.controller
 
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
@@ -17,10 +18,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.annotation.Transactional
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
@@ -30,6 +27,7 @@ import ru.a1pha1337.featurify.dto.CreatedAccessTokenResponse
 import ru.a1pha1337.featurify.dto.NamespaceResponse
 import ru.a1pha1337.featurify.service.AccessTokenService
 import ru.a1pha1337.featurify.service.FeatureToggleService
+import tools.jackson.databind.json.JsonMapper
 import java.util.UUID
 
 @SpringBootTest(properties = ["spring.grpc.server.enabled=false", "vaadin.productionMode=true"])
@@ -74,15 +72,24 @@ class FeatureSecurityDatabaseTests {
         for (path in listOf("/api/v1/features", "/api/v1/features/enabled", "/api/v1/features:resolve?keys=enabled")) {
             mvc
                 .perform(get(path))
-                .andExpect(status().isUnauthorized)
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.status").value(401))
-                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
-                .andExpect(jsonPath("$.type").value("urn:featurify:problem:unauthorized"))
-                .andExpect(header().exists("WWW-Authenticate"))
-            mvc.perform(get(path).with(jwt())).andExpect(status().isUnauthorized)
-            mvc.perform(get(path).with(oauth2Login())).andExpect(status().isUnauthorized)
-            mvc.perform(head(path)).andExpect(status().isUnauthorized)
+                .andExpect { assertThat(it.response.status).isEqualTo(401) }
+                .andExpect {
+                    assertThat(
+                        MediaType.parseMediaType(it.response.contentType!!).isCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON),
+                    ).isTrue()
+                }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/status").asInt()).isEqualTo(401) }
+                .andExpect {
+                    assertThat(
+                        JsonMapper().readTree(it.response.contentAsString).at("/code").asString(),
+                    ).isEqualTo("UNAUTHORIZED")
+                }.andExpect {
+                    assertThat(
+                        JsonMapper().readTree(it.response.contentAsString).at("/type").asString(),
+                    ).isEqualTo("urn:featurify:problem:unauthorized")
+                }.andExpect { assertThat(it.response.getHeader("WWW-Authenticate")).isNotNull() }
+            mvc.perform(get(path).with(jwt())).andExpect { assertThat(it.response.status).isEqualTo(401) }
+            mvc.perform(get(path).with(oauth2Login())).andExpect { assertThat(it.response.status).isEqualTo(401) }
+            mvc.perform(head(path)).andExpect { assertThat(it.response.status).isEqualTo(401) }
         }
     }
 
@@ -90,26 +97,37 @@ class FeatureSecurityDatabaseTests {
     fun `read scope is always token namespace and query cannot select another namespace`() {
         mvc
             .perform(get("/api/v1/features").header("Authorization", "Bearer ${blueToken.token}"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.content[0].value").value(false))
+            .andExpect { assertThat(it.response.status).isEqualTo(200) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/content/0/value").asBoolean(),
+                ).isEqualTo(false)
+            }
         mvc
             .perform(get("/api/v1/features/enabled").header("Authorization", "Bearer ${redToken.token}"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.value").value(true))
+            .andExpect { assertThat(it.response.status).isEqualTo(200) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/value").asBoolean()).isEqualTo(true) }
         mvc
             .perform(
                 get("/api/v1/features:resolve")
                     .param("keys", "enabled")
                     .param("namespace", blue.key)
                     .header("Authorization", "Bearer ${blueToken.token}"),
-            ).andExpect(status().isOk)
-            .andExpect(jsonPath("$.features.enabled.value").value(false))
+            ).andExpect { assertThat(it.response.status).isEqualTo(200) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/features/enabled/value").asBoolean(),
+                ).isEqualTo(false)
+            }
         for (path in listOf("/api/v1/features", "/api/v1/features/enabled", "/api/v1/features:resolve?keys=enabled")) {
             mvc
                 .perform(get(path).param("namespace", red.key).header("Authorization", "Bearer ${blueToken.token}"))
-                .andExpect(status().isForbidden)
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect { assertThat(it.response.status).isEqualTo(403) }
+                .andExpect {
+                    assertThat(
+                        MediaType.parseMediaType(it.response.contentType!!).isCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON),
+                    ).isTrue()
+                }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/code").asString()).isEqualTo("FORBIDDEN") }
         }
     }
 
@@ -118,21 +136,21 @@ class FeatureSecurityDatabaseTests {
         tokens.revoke(blue.key, blueToken.id)
         mvc
             .perform(get("/api/v1/features").header("Authorization", "Bearer ${blueToken.token}"))
-            .andExpect(status().isUnauthorized)
+            .andExpect { assertThat(it.response.status).isEqualTo(401) }
         jdbc.update("UPDATE namespace SET active = false WHERE id = ?", red.id)
         mvc
             .perform(get("/api/v1/features").header("Authorization", "Bearer ${redToken.token}"))
-            .andExpect(status().isUnauthorized)
+            .andExpect { assertThat(it.response.status).isEqualTo(401) }
         features.deleteNamespace(red.key)
         mvc
             .perform(get("/api/v1/features").header("Authorization", "Bearer ${redToken.token}"))
-            .andExpect(status().isUnauthorized)
+            .andExpect { assertThat(it.response.status).isEqualTo(401) }
     }
 
     @Test
     fun `malformed duplicated and oversized credentials are rejected`() {
         for (value in listOf("garbage", "Bearer bad", "Bearer " + "a".repeat(101))) {
-            mvc.perform(get("/api/v1/features").header("Authorization", value)).andExpect(status().isUnauthorized)
+            mvc.perform(get("/api/v1/features").header("Authorization", value)).andExpect { assertThat(it.response.status).isEqualTo(401) }
         }
         mvc
             .perform(
@@ -141,7 +159,7 @@ class FeatureSecurityDatabaseTests {
                     "Bearer ${blueToken.token}",
                     "Bearer ${redToken.token}",
                 ),
-            ).andExpect(status().isUnauthorized)
+            ).andExpect { assertThat(it.response.status).isEqualTo(401) }
     }
 
     @Test
@@ -166,12 +184,20 @@ class FeatureSecurityDatabaseTests {
         for (request in requests) {
             mvc
                 .perform(request)
-                .andExpect(status().isUnauthorized)
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect { assertThat(it.response.status).isEqualTo(401) }
+                .andExpect {
+                    assertThat(
+                        MediaType.parseMediaType(it.response.contentType!!).isCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON),
+                    ).isTrue()
+                }
             mvc
                 .perform(request.header("Authorization", "Bearer ${blueToken.token}"))
-                .andExpect(status().isUnauthorized)
-                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect { assertThat(it.response.status).isEqualTo(401) }
+                .andExpect {
+                    assertThat(
+                        JsonMapper().readTree(it.response.contentAsString).at("/code").asString(),
+                    ).isEqualTo("UNAUTHORIZED")
+                }
         }
     }
 
@@ -184,40 +210,58 @@ class FeatureSecurityDatabaseTests {
                     .with(jwt())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("""{"key":"newFlag","type":"BOOLEAN","booleanValue":true}"""),
-            ).andExpect(status().isCreated)
+            ).andExpect { assertThat(it.response.status).isEqualTo(201) }
         mvc
             .perform(get("/api/v1/features/enabled/history").param("namespace", blue.key).with(jwt()))
-            .andExpect(status().isOk)
+            .andExpect { assertThat(it.response.status).isEqualTo(200) }
         mvc
             .perform(get("/api/v1/namespaces/${blue.key}/tokens").with(oauth2Login()))
-            .andExpect(status().isOk)
+            .andExpect { assertThat(it.response.status).isEqualTo(200) }
     }
 
     @Test
     fun `REST errors use problem details after namespace authentication`() {
         mvc
             .perform(get("/api/v1/features/missing").header("Authorization", "Bearer ${blueToken.token}"))
-            .andExpect(status().isNotFound)
-            .andExpect(jsonPath("$.title").value("Not Found"))
-            .andExpect(jsonPath("$.instance").value("/api/v1/features/missing"))
-            .andExpect(jsonPath("$.status").value(404))
-            .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+            .andExpect { assertThat(it.response.status).isEqualTo(404) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/title").asString()).isEqualTo("Not Found") }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/instance").asString(),
+                ).isEqualTo("/api/v1/features/missing")
+            }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/status").asInt()).isEqualTo(404) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/code").asString()).isEqualTo("NOT_FOUND") }
         mvc
             .perform(get("/api/v1/features:resolve").header("Authorization", "Bearer ${blueToken.token}"))
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.details[0].field").value("keys"))
+            .andExpect { assertThat(it.response.status).isEqualTo(400) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/details/0/field").asString(),
+                ).isEqualTo("keys")
+            }
         mvc
             .perform(get("/api/v1/features").param("query", "a").header("Authorization", "Bearer ${blueToken.token}"))
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.details[0].field").value("query"))
+            .andExpect { assertThat(it.response.status).isEqualTo(400) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/details/0/field").asString(),
+                ).isEqualTo("query")
+            }
         mvc
             .perform(get("/api/v1/unknown").with(jwt()))
-            .andExpect(status().isNotFound)
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+            .andExpect { assertThat(it.response.status).isEqualTo(404) }
+            .andExpect {
+                assertThat(
+                    MediaType.parseMediaType(it.response.contentType!!).isCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON),
+                ).isTrue()
+            }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/code").asString()).isEqualTo("NOT_FOUND") }
         mvc
             .perform(put("/api/v1/features").with(jwt()))
-            .andExpect(status().isMethodNotAllowed)
-            .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
+            .andExpect { assertThat(it.response.status).isEqualTo(405) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/code").asString(),
+                ).isEqualTo("METHOD_NOT_ALLOWED")
+            }
     }
 }

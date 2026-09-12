@@ -1,14 +1,12 @@
 package ru.a1pha1337.featurify.security
 
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.servlet.FilterChain
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertThrows
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -20,7 +18,7 @@ import java.time.Instant
 import java.util.UUID
 
 class NamespaceTokenFilterTests {
-    private val tokens = mock(AccessTokenService::class.java)
+    private val tokens = mockk<AccessTokenService>(relaxUnitFun = true)
     private val mapper = JsonMapper.builder().build()
     private val filter = NamespaceTokenFilter(tokens, mapper)
 
@@ -28,32 +26,33 @@ class NamespaceTokenFilterTests {
 
     @Test
     fun `storage failure returns service unavailable problem without invoking controller`() {
-        `when`(tokens.authenticateNamespace("token")).thenThrow(DataAccessResourceFailureException("private"))
+        every { tokens.authenticateNamespace("token") } throws DataAccessResourceFailureException("private")
         val response = MockHttpServletResponse()
-        val chain = mock(FilterChain::class.java)
+        val chain = mockk<FilterChain>()
         filter.doFilter(request(), response, chain)
-        assertEquals(503, response.status)
-        assertEquals("application/problem+json", response.contentType)
+        assertThat(response.status).isEqualTo(503)
+        assertThat(response.contentType).isEqualTo("application/problem+json")
         val body = mapper.readTree(response.contentAsString)
-        assertEquals(503, body.path("status").asInt())
-        assertEquals("Authentication temporarily unavailable", body.path("detail").asText())
-        assertFalse(response.contentAsString.contains("private"))
-        verifyNoInteractions(chain)
+        assertThat(body.path("status").asInt()).isEqualTo(503)
+        assertThat(body.path("detail").asString()).isEqualTo("Authentication temporarily unavailable")
+        assertThat(response.contentAsString).doesNotContain("private")
+        verify(exactly = 0) { chain.doFilter(any(), any()) }
     }
 
     @Test
     fun `authenticated namespace and credential removal are scoped to current request`() {
         val now = Instant.now()
         val namespace = Namespace(UUID.randomUUID(), "blue", "Blue", true, now, now)
-        `when`(tokens.authenticateNamespace("token")).thenReturn(namespace)
+        every { tokens.authenticateNamespace("token") } returns namespace
         val chain =
             FilterChain { _, _ ->
                 val authentication = checkNotNull(SecurityContextHolder.getContext().authentication)
-                assertEquals(NamespacePrincipal(namespace.id!!, "blue"), authentication.principal)
-                assertNull(authentication.credentials)
+                assertThat(authentication.principal).isEqualTo(NamespacePrincipal(namespace.id!!, "blue"))
+                assertThat(authentication.credentials).isNull()
                 throw IllegalStateException("downstream")
             }
-        assertThrows(IllegalStateException::class.java) { filter.doFilter(request(), MockHttpServletResponse(), chain) }
-        assertNull(SecurityContextHolder.getContext().authentication)
+        assertThatThrownBy { filter.doFilter(request(), MockHttpServletResponse(), chain) }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 }

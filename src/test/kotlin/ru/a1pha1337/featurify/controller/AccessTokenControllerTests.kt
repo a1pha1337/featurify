@@ -1,27 +1,25 @@
 package ru.a1pha1337.featurify.controller
 
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when`
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import ru.a1pha1337.featurify.dto.AccessTokenResponse
 import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
 import ru.a1pha1337.featurify.dto.CreatedAccessTokenResponse
 import ru.a1pha1337.featurify.service.AccessTokenService
+import tools.jackson.databind.json.JsonMapper
 import java.time.Instant
 import java.util.UUID
 
 class AccessTokenControllerTests {
-    private val service = mock(AccessTokenService::class.java)
+    private val service = mockk<AccessTokenService>(relaxUnitFun = true)
     private val mvc =
         MockMvcBuilders
             .standaloneSetup(AccessTokenController(service))
@@ -32,30 +30,33 @@ class AccessTokenControllerTests {
 
     @Test
     fun `creation returns secret once with no store cache policy`() {
-        `when`(service.create("blue", CreateAccessTokenRequest("backend")))
-            .thenReturn(CreatedAccessTokenResponse(id, "backend", now, "test-only-secret"))
+        every { service.create("blue", CreateAccessTokenRequest("backend")) } returns
+            CreatedAccessTokenResponse(id, "backend", now, "test-only-secret")
         mvc
             .perform(
                 post("/api/v1/namespaces/blue/tokens")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("""{"name":"backend"}"""),
-            ).andExpect(status().isCreated)
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(jsonPath("$.token").value("test-only-secret"))
-            .andExpect(jsonPath("$.tokenHash").doesNotExist())
+            ).andExpect { assertThat(it.response.status).isEqualTo(201) }
+            .andExpect { assertThat(it.response.getHeader("Cache-Control")).isEqualTo("no-store") }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/token").asString(),
+                ).isEqualTo("test-only-secret")
+            }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/tokenHash").isMissingNode).isTrue() }
     }
 
     @Test
     fun `list excludes secrets and hashes and revoke uses namespace scope`() {
-        `when`(service.list("blue")).thenReturn(listOf(AccessTokenResponse(id, "backend", now)))
+        every { service.list("blue") } returns listOf(AccessTokenResponse(id, "backend", now))
         mvc
             .perform(get("/api/v1/namespaces/blue/tokens"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].name").value("backend"))
-            .andExpect(jsonPath("$[0].token").doesNotExist())
-            .andExpect(jsonPath("$[0].tokenHash").doesNotExist())
-        mvc.perform(delete("/api/v1/namespaces/blue/tokens/$id")).andExpect(status().isNoContent)
-        verify(service).revoke("blue", id)
+            .andExpect { assertThat(it.response.status).isEqualTo(200) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/0/name").asString()).isEqualTo("backend") }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/0/token").isMissingNode).isTrue() }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/0/tokenHash").isMissingNode).isTrue() }
+        mvc.perform(delete("/api/v1/namespaces/blue/tokens/$id")).andExpect { assertThat(it.response.status).isEqualTo(204) }
+        verify { service.revoke("blue", id) }
     }
 
     @Test
@@ -65,7 +66,7 @@ class AccessTokenControllerTests {
                 post("/api/v1/namespaces/blue/tokens")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("""{"name":" "}"""),
-            ).andExpect(status().isBadRequest)
-        verifyNoInteractions(service)
+            ).andExpect { assertThat(it.response.status).isEqualTo(400) }
+        verify(exactly = 0) { service.create(any(), any()) }
     }
 }

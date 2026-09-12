@@ -1,31 +1,29 @@
 package ru.a1pha1337.featurify.controller
 
+import io.mockk.clearMocks
+import io.mockk.every
+import io.mockk.mockk
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.reset
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import ru.a1pha1337.featurify.service.AccessTokenService
 import ru.a1pha1337.featurify.service.ConflictException
 import ru.a1pha1337.featurify.service.FeatureToggleService
+import tools.jackson.databind.json.JsonMapper
 
 class ApiProblemTests {
-    private val tokens = mock(AccessTokenService::class.java)
+    private val tokens = mockk<AccessTokenService>(relaxUnitFun = true)
     private val mvc =
         MockMvcBuilders
             .standaloneSetup(
                 AccessTokenController(tokens),
-                AdminFeatureController(mock(FeatureToggleService::class.java)),
+                AdminFeatureController(mockk<FeatureToggleService>()),
             ).setControllerAdvice(ApiExceptionHandler())
             .build()
     private val path = "/api/v1/namespaces/blue/tokens"
@@ -34,54 +32,89 @@ class ApiProblemTests {
     fun `invalid JSON and bean validation produce RFC9457 without rejected values`() {
         mvc
             .perform(post(path).contentType(MediaType.APPLICATION_JSON).content("{"))
-            .andExpect(status().isBadRequest)
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(jsonPath("$.type").value("urn:featurify:problem:malformed-json"))
-            .andExpect(jsonPath("$.title").value("Bad Request"))
-            .andExpect(jsonPath("$.status").value(400))
-            .andExpect(jsonPath("$.detail").value("Request body is missing or malformed"))
-            .andExpect(jsonPath("$.instance").value(path))
-            .andExpect(jsonPath("$.message").doesNotExist())
+            .andExpect { assertThat(it.response.status).isEqualTo(400) }
+            .andExpect {
+                assertThat(
+                    MediaType.parseMediaType(it.response.contentType!!).isCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON),
+                ).isTrue()
+            }.andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/type").asString(),
+                ).isEqualTo("urn:featurify:problem:malformed-json")
+            }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/title").asString()).isEqualTo("Bad Request") }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/status").asInt()).isEqualTo(400) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/detail").asString(),
+                ).isEqualTo("Request body is missing or malformed")
+            }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/instance").asString()).isEqualTo(path) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/message").isMissingNode).isTrue() }
         mvc
             .perform(post(path).contentType(MediaType.APPLICATION_JSON).content("""{"name":" "}"""))
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
-            .andExpect(jsonPath("$.details[0].field").value("name"))
+            .andExpect { assertThat(it.response.status).isEqualTo(400) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/code").asString(),
+                ).isEqualTo("VALIDATION_ERROR")
+            }.andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/details/0/field").asString(),
+                ).isEqualTo("name")
+            }
     }
 
     @Test
     fun `MVC type mismatch unsupported method and content type use proper client error statuses`() {
         mvc
             .perform(delete("$path/not-a-uuid"))
-            .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.status").value(400))
+            .andExpect { assertThat(it.response.status).isEqualTo(400) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/status").asInt()).isEqualTo(400) }
         mvc
             .perform(put(path))
-            .andExpect(status().isMethodNotAllowed)
-            .andExpect(header().exists("Allow"))
-            .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
+            .andExpect { assertThat(it.response.status).isEqualTo(405) }
+            .andExpect { assertThat(it.response.getHeader("Allow")).isNotNull() }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/code").asString(),
+                ).isEqualTo("METHOD_NOT_ALLOWED")
+            }
         mvc
             .perform(post(path).contentType(MediaType.TEXT_PLAIN).content("test"))
-            .andExpect(status().isUnsupportedMediaType)
-            .andExpect(jsonPath("$.status").value(415))
+            .andExpect { assertThat(it.response.status).isEqualTo(415) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/status").asInt()).isEqualTo(415) }
     }
 
     @Test
     fun `conflict storage failure and unexpected errors have stable codes and safe details`() {
-        `when`(tokens.list("blue")).thenThrow(ConflictException("Resource conflict"))
-        mvc.perform(get(path)).andExpect(status().isConflict).andExpect(jsonPath("$.code").value("CONFLICT"))
-        reset(tokens)
-        `when`(tokens.list("blue")).thenThrow(DataAccessResourceFailureException("private JDBC connection string"))
+        every { tokens.list("blue") } throws ConflictException("Resource conflict")
         mvc
             .perform(get(path))
-            .andExpect(status().isServiceUnavailable)
-            .andExpect(jsonPath("$.detail").value("Service temporarily unavailable"))
-        reset(tokens)
-        `when`(tokens.list("blue")).thenThrow(IllegalStateException("private implementation details"))
+            .andExpect {
+                assertThat(it.response.status).isEqualTo(409)
+            }.andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/code").asString()).isEqualTo("CONFLICT") }
+        clearMocks(tokens)
+        every { tokens.list("blue") } throws DataAccessResourceFailureException("private JDBC connection string")
         mvc
             .perform(get(path))
-            .andExpect(status().isInternalServerError)
-            .andExpect(jsonPath("$.detail").value("An unexpected error occurred"))
-            .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+            .andExpect { assertThat(it.response.status).isEqualTo(503) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/detail").asString(),
+                ).isEqualTo("Service temporarily unavailable")
+            }
+        clearMocks(tokens)
+        every { tokens.list("blue") } throws IllegalStateException("private implementation details")
+        mvc
+            .perform(get(path))
+            .andExpect { assertThat(it.response.status).isEqualTo(500) }
+            .andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/detail").asString(),
+                ).isEqualTo("An unexpected error occurred")
+            }.andExpect {
+                assertThat(
+                    JsonMapper().readTree(it.response.contentAsString).at("/code").asString(),
+                ).isEqualTo("INTERNAL_ERROR")
+            }
     }
 }

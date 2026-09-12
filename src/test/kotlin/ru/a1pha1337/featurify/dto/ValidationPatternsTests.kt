@@ -1,7 +1,6 @@
 package ru.a1pha1337.featurify.dto
 
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class ValidationPatternsTests {
@@ -10,9 +9,9 @@ class ValidationPatternsTests {
         val accepted =
             listOf("camelCase", "PascalCase", "kebab-case", "release2", "V2-api", "checkout.payment-provider")
         accepted.forEach { key ->
-            assertTrue(Regex(ValidationPatterns.NAMESPACE_KEY).matches(key), "namespace: $key")
-            assertTrue(Regex(ValidationPatterns.FEATURE_GROUP).matches(key), "group: $key")
-            assertTrue(Regex(ValidationPatterns.FEATURE_KEY).matches(key), "feature: $key")
+            assertThat(Regex(ValidationPatterns.NAMESPACE_KEY).matches(key)).withFailMessage("namespace: $key").isTrue()
+            assertThat(Regex(ValidationPatterns.FEATURE_GROUP).matches(key)).withFailMessage("group: $key").isTrue()
+            assertThat(Regex(ValidationPatterns.FEATURE_KEY).matches(key)).withFailMessage("feature: $key").isTrue()
         }
     }
 
@@ -34,9 +33,9 @@ class ValidationPatternsTests {
                 "slash/value",
             )
         rejected.forEach { key ->
-            assertFalse(Regex(ValidationPatterns.NAMESPACE_KEY).matches(key), "namespace: $key")
-            assertFalse(Regex(ValidationPatterns.FEATURE_GROUP).matches(key), "group: $key")
-            assertFalse(Regex(ValidationPatterns.FEATURE_KEY).matches(key), "feature: $key")
+            assertThat(Regex(ValidationPatterns.NAMESPACE_KEY).matches(key)).withFailMessage("namespace: $key").isFalse()
+            assertThat(Regex(ValidationPatterns.FEATURE_GROUP).matches(key)).withFailMessage("group: $key").isFalse()
+            assertThat(Regex(ValidationPatterns.FEATURE_KEY).matches(key)).withFailMessage("feature: $key").isFalse()
         }
     }
 }

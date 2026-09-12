@@ -1,14 +1,13 @@
 package ru.a1pha1337.featurify.service
 
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertThrows
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.`when`
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -35,12 +34,12 @@ import java.util.Optional
 import java.util.UUID
 
 class FeatureToggleServiceTests {
-    private val namespaceRepository = mock(NamespaceRepository::class.java)
-    private val featureRepository = mock(FeatureRepository::class.java)
-    private val groupRepository = mock(FeatureGroupRepository::class.java)
-    private val optionRepository = mock(FeatureEnumOptionRepository::class.java)
-    private val auditRepository = mock(FeatureAuditLogRepository::class.java)
-    private val actorProvider = mock(ActorProvider::class.java)
+    private val namespaceRepository = mockk<NamespaceRepository>(relaxed = true)
+    private val featureRepository = mockk<FeatureRepository>(relaxed = true)
+    private val groupRepository = mockk<FeatureGroupRepository>(relaxed = true)
+    private val optionRepository = mockk<FeatureEnumOptionRepository>(relaxed = true)
+    private val auditRepository = mockk<FeatureAuditLogRepository>(relaxed = true)
+    private val actorProvider = mockk<ActorProvider>(relaxed = true)
     private val now = Instant.parse("2026-09-11T12:00:00Z")
     private val namespaceId = UUID.randomUUID()
     private val featureId = UUID.randomUUID()
@@ -48,7 +47,11 @@ class FeatureToggleServiceTests {
 
     @BeforeEach
     fun setUp() {
-        `when`(actorProvider.currentUsername()).thenReturn("test-user")
+        every { namespaceRepository.findByKey(any()) } returns null
+        every { groupRepository.findByNamespaceIdAndKey(any(), any()) } returns null
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(any(), any()) } returns null
+        every { featureRepository.findByNamespaceIdAndGroupIdAndKey(any(), any(), any()) } returns null
+        every { actorProvider.currentUsername() } returns "test-user"
         service =
             FeatureToggleService(
                 namespaceRepository,
@@ -59,15 +62,13 @@ class FeatureToggleServiceTests {
                 actorProvider,
                 Clock.fixed(now, ZoneOffset.UTC),
             )
-        `when`(namespaceRepository.findByKey("blue")).thenReturn(
-            Namespace(namespaceId, "blue", "Blue", true, now, now),
-        )
+        every { namespaceRepository.findByKey("blue") } returns Namespace(namespaceId, "blue", "Blue", true, now, now)
     }
 
     @Test
     fun `enum current value must be one of its options`() {
         val exception =
-            assertThrows(DomainValidationException::class.java) {
+            catchThrowableOfType(DomainValidationException::class.java) {
                 service.createFeature(
                     "blue",
                     CreateFeatureRequest(
@@ -77,20 +78,19 @@ class FeatureToggleServiceTests {
                         enumOptions = listOf("CAT", "MONKEY"),
                     ),
                 )
-            }
+            }.also { assertThat(it).isNotNull() }
 
-        assertEquals("enumValue", exception.violations.single().first)
-        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        assertThat(exception.violations.single().first).isEqualTo("enumValue")
+        verify(exactly = 0) { featureRepository.save(any()) }
     }
 
     @Test
     fun `feature creation accepts camel Pascal kebab dotted and digits after first letter`() {
-        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
-            .thenAnswer { it.getArgument<Feature>(0).copy(id = featureId, version = 0) }
+        every { featureRepository.save(any<Feature>()) } answers { arg<Feature>(0).copy(id = featureId, version = 0) }
         listOf("camelCase", "PascalCase", "kebab-case", "checkout.payment-provider", "release2").forEach { key ->
             val created =
                 service.createFeature("blue", CreateFeatureRequest(key, FeatureType.BOOLEAN, booleanValue = true))
-            assertEquals(key, created.key)
+            assertThat(created.key).isEqualTo(key)
         }
     }
 
@@ -106,23 +106,23 @@ class FeatureToggleServiceTests {
             "with--double",
             "2release",
         ).forEach { key ->
-            assertThrows(DomainValidationException::class.java) {
+            catchThrowableOfType(DomainValidationException::class.java) {
                 service.createFeature("blue", CreateFeatureRequest(key, FeatureType.BOOLEAN, booleanValue = true))
-            }
+            }.also { assertThat(it).isNotNull() }
         }
-        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        verify(exactly = 0) { featureRepository.save(any()) }
     }
 
     @Test
     fun `stale version is rejected before update`() {
         val feature = booleanFeature(version = 5)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) } returns feature
 
-        assertThrows(ConflictException::class.java) {
+        catchThrowableOfType(ConflictException::class.java) {
             service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 4, booleanValue = true))
-        }
+        }.also { assertThat(it).isNotNull() }
 
-        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        verify(exactly = 0) { featureRepository.save(any()) }
     }
 
     @Test
@@ -130,29 +130,27 @@ class FeatureToggleServiceTests {
         val groupId = UUID.randomUUID()
         val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(version = 2).copy(groupId = groupId)
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
-        `when`(groupRepository.findById(groupId)).thenReturn(Optional.of(group))
-        `when`(
-            featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key),
-        ).thenReturn(feature)
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout") } returns group
+        every { groupRepository.findById(groupId) } returns Optional.of(group)
+        every { featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key) } returns feature
 
         val result = service.getFeature("blue", feature.key, "checkout")
 
-        assertEquals("checkout", result.group)
-        assertEquals(feature.key, result.key)
-        verify(featureRepository).findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key)
-        verify(featureRepository, never()).findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)
+        assertThat(result.group).isEqualTo("checkout")
+        assertThat(result.key).isEqualTo(feature.key)
+        verify(exactly = 1) { featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key) }
+        verify(exactly = 0) { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) }
     }
 
     @Test
     fun `feature without group uses global lookup`() {
         val feature = booleanFeature(version = 2)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) } returns feature
 
         val result = service.getFeature("blue", feature.key, null)
 
-        assertEquals(null, result.group)
-        verify(featureRepository).findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)
+        assertThat(result.group).isNull()
+        verify(exactly = 1) { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) }
     }
 
     @Test
@@ -162,59 +160,56 @@ class FeatureToggleServiceTests {
         val source = FeatureGroup(sourceId, namespaceId, "old", "Old", createdAt = now, updatedAt = now)
         val target = FeatureGroup(targetId, namespaceId, "new", "New", createdAt = now, updatedAt = now)
         val feature = booleanFeature(version = 2).copy(groupId = sourceId)
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "old")).thenReturn(source)
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "new")).thenReturn(target)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, sourceId, feature.key)).thenReturn(
-            feature,
-        )
-        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
-            .thenAnswer { invocation -> invocation.getArgument(0) }
-        `when`(groupRepository.findById(targetId)).thenReturn(Optional.of(target))
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, "old") } returns source
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, "new") } returns target
+        every { featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, sourceId, feature.key) } returns feature
+        every { featureRepository.save(any<Feature>()) } answers { firstArg() }
+        every { groupRepository.findById(targetId) } returns Optional.of(target)
 
         val result = service.moveFeature("blue", feature.key, "old", MoveFeatureRequest(2, "new"))
 
-        assertEquals("new", result.group)
-        val captor = ArgumentCaptor.forClass(Feature::class.java)
-        verify(featureRepository).save(captor.capture())
-        assertEquals(targetId, captor.value.groupId)
+        assertThat(result.group).isEqualTo("new")
+        val captor = slot<Feature>()
+        verify(exactly = 1) { featureRepository.save(capture(captor)) }
+        assertThat(captor.captured.groupId).isEqualTo(targetId)
     }
 
     @Test
     fun `public feature list keeps spring pagination metadata`() {
         val pageable = PageRequest.of(1, 10, Sort.by("key"))
         val feature = booleanFeature(version = 2)
-        `when`(
-            featureRepository.findAllByNamespaceId(namespaceId, pageable),
-        ).thenReturn(PageImpl(listOf(feature), pageable, 11))
+        every { featureRepository.findAllByNamespaceId(namespaceId, pageable) } returns PageImpl(listOf(feature), pageable, 11)
 
         val result = service.listFeatures("blue", pageable, null)
 
-        assertEquals(1, result.number)
-        assertEquals(10, result.size)
-        assertEquals(11, result.totalElements)
-        assertEquals(feature.key, result.content.single().key)
+        assertThat(result.number).isEqualTo(1)
+        assertThat(result.size).isEqualTo(10)
+        assertThat(result.totalElements).isEqualTo(11)
+        assertThat(result.content.single().key).isEqualTo(feature.key)
     }
 
     @Test
     fun `feature search normalizes key and keeps pagination`() {
         val pageable = PageRequest.of(0, 10, Sort.by("key"))
         val feature = booleanFeature(version = 2)
-        `when`(
+        every {
             featureRepository.findAllByNamespaceIdAndKeyContaining(
                 namespaceId,
                 "checkout",
                 pageable,
-            ),
-        ).thenReturn(PageImpl(listOf(feature), pageable, 1))
+            )
+        } returns PageImpl(listOf(feature), pageable, 1)
 
         val result = service.listFeatures("blue", pageable, " CHECKOUT ")
 
-        assertEquals(feature.key, result.content.single().key)
-        verify(featureRepository).findAllByNamespaceIdAndKeyContaining(
-            namespaceId,
-            "checkout",
-            pageable,
-        )
+        assertThat(result.content.single().key).isEqualTo(feature.key)
+        verify(exactly = 1) {
+            featureRepository.findAllByNamespaceIdAndKeyContaining(
+                namespaceId,
+                "checkout",
+                pageable,
+            )
+        }
     }
 
     @Test
@@ -222,21 +217,19 @@ class FeatureToggleServiceTests {
         val pageable = PageRequest.of(0, 10)
 
         val exception =
-            assertThrows(DomainValidationException::class.java) {
+            catchThrowableOfType(DomainValidationException::class.java) {
                 service.listFeatures("blue", pageable, "ab")
-            }
+            }.also { assertThat(it).isNotNull() }
 
-        assertEquals("query", exception.violations.single().first)
+        assertThat(exception.violations.single().first).isEqualTo("query")
     }
 
     @Test
     fun `feature without namespace is created in default namespace`() {
         val defaultNamespaceId = UUID.randomUUID()
-        `when`(namespaceRepository.findByDefaultNamespaceTrue()).thenReturn(
-            Namespace(defaultNamespaceId, "default", "Default", true, now, now, true),
-        )
-        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
-            .thenAnswer { invocation -> invocation.getArgument(0) }
+        every { namespaceRepository.findByDefaultNamespaceTrue() } returns
+            Namespace(defaultNamespaceId, "default", "Default", true, now, now, true)
+        every { featureRepository.save(any<Feature>()) } answers { firstArg() }
 
         service.createFeature(
             null,
@@ -247,9 +240,9 @@ class FeatureToggleServiceTests {
             ),
         )
 
-        val featureCaptor = ArgumentCaptor.forClass(Feature::class.java)
-        verify(featureRepository).save(featureCaptor.capture())
-        assertEquals(defaultNamespaceId, featureCaptor.value.namespaceId)
+        val featureCaptor = slot<Feature>()
+        verify(exactly = 1) { featureRepository.save(capture(featureCaptor)) }
+        assertThat(featureCaptor.captured.namespaceId).isEqualTo(defaultNamespaceId)
     }
 
     @Test
@@ -265,42 +258,39 @@ class FeatureToggleServiceTests {
                 createdAt = now,
                 updatedAt = now,
             )
-        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
-        `when`(optionRepository.findAllByFeatureIdOrderBySortOrder(featureId)).thenReturn(
-            listOf(FeatureEnumOption(UUID.randomUUID(), featureId, "CAT", 0)),
-        )
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) } returns feature
+        every { optionRepository.findAllByFeatureIdOrderBySortOrder(featureId) } returns
+            listOf(FeatureEnumOption(UUID.randomUUID(), featureId, "CAT", 0))
 
-        assertThrows(DomainValidationException::class.java) {
+        catchThrowableOfType(DomainValidationException::class.java) {
             service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 1, enumValue = "DOG"))
-        }
+        }.also { assertThat(it).isNotNull() }
     }
 
     @Test
     fun `group creation normalizes input and saves an empty group`() {
-        `when`(groupRepository.save(org.mockito.ArgumentMatchers.any(FeatureGroup::class.java)))
-            .thenAnswer { invocation ->
-                invocation.getArgument<FeatureGroup>(0).copy(id = UUID.randomUUID(), version = 0)
-            }
+        every { groupRepository.save(any<FeatureGroup>()) } answers {
+            arg<FeatureGroup>(0).copy(id = UUID.randomUUID(), version = 0)
+        }
 
         val result = service.createGroup("blue", CreateFeatureGroupRequest(" checkout ", " Checkout "))
 
-        assertEquals("checkout", result.key)
-        assertEquals("Checkout", result.displayName)
-        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        assertThat(result.key).isEqualTo("checkout")
+        assertThat(result.displayName).isEqualTo("Checkout")
+        verify(exactly = 0) { featureRepository.save(any()) }
     }
 
     @Test
     fun `group creation rejects blank name and duplicate key`() {
-        assertThrows(DomainValidationException::class.java) {
+        catchThrowableOfType(DomainValidationException::class.java) {
             service.createGroup("blue", CreateFeatureGroupRequest("checkout", " "))
-        }
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(
-            FeatureGroup(UUID.randomUUID(), namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now),
-        )
-        assertThrows(ConflictException::class.java) {
+        }.also { assertThat(it).isNotNull() }
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout") } returns
+            FeatureGroup(UUID.randomUUID(), namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        catchThrowableOfType(ConflictException::class.java) {
             service.createGroup("blue", CreateFeatureGroupRequest("checkout", "Checkout"))
-        }
-        verify(groupRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        }.also { assertThat(it).isNotNull() }
+        verify(exactly = 0) { groupRepository.save(any()) }
     }
 
     @Test
@@ -308,19 +298,16 @@ class FeatureToggleServiceTests {
         val groupId = UUID.randomUUID()
         val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(2).copy(groupId = groupId)
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key)).thenReturn(
-            feature,
-        )
-        `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
-            .thenAnswer { it.getArgument<Feature>(0) }
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout") } returns group
+        every { featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key) } returns feature
+        every { featureRepository.save(any<Feature>()) } answers { arg<Feature>(0) }
 
         val result = service.moveFeature("blue", feature.key, "checkout", MoveFeatureRequest(2, null))
 
-        assertEquals(null, result.group)
-        val saved = ArgumentCaptor.forClass(Feature::class.java)
-        verify(featureRepository).save(saved.capture())
-        assertEquals(null, saved.value.groupId)
+        assertThat(result.group).isNull()
+        val saved = slot<Feature>()
+        verify(exactly = 1) { featureRepository.save(capture(saved)) }
+        assertThat(saved.captured.groupId).isNull()
     }
 
     @Test
@@ -328,15 +315,15 @@ class FeatureToggleServiceTests {
         val groupId = UUID.randomUUID()
         val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(2)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key))
-            .thenReturn(feature.copy(id = UUID.randomUUID(), groupId = groupId))
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) } returns feature
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout") } returns group
+        every { featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key) } returns
+            feature.copy(id = UUID.randomUUID(), groupId = groupId)
 
-        assertThrows(ConflictException::class.java) {
+        catchThrowableOfType(ConflictException::class.java) {
             service.moveFeature("blue", feature.key, null, MoveFeatureRequest(2, "checkout"))
-        }
-        verify(featureRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        }.also { assertThat(it).isNotNull() }
+        verify(exactly = 0) { featureRepository.save(any()) }
     }
 
     @Test
@@ -344,73 +331,78 @@ class FeatureToggleServiceTests {
         val groupId = UUID.randomUUID()
         val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val page = PageRequest.of(1, 20)
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
-        `when`(
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout") } returns group
+        every {
             featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
                 namespaceId,
                 groupId,
                 "checkout",
                 page,
-            ),
-        ).thenReturn(PageImpl(emptyList(), page, 21))
+            )
+        } returns PageImpl(emptyList(), page, 21)
 
         val result = service.listForAdmin("blue", page, " CHECKOUT ", "checkout")
 
-        assertEquals(21, result.totalElements)
-        assertEquals(1, result.number)
-        verify(featureRepository).findAllByNamespaceIdAndGroupIdAndKeyContaining(
-            namespaceId,
-            groupId,
-            "checkout",
-            page,
-        )
+        assertThat(result.totalElements).isEqualTo(21)
+        assertThat(result.number).isEqualTo(1)
+        verify(exactly = 1) {
+            featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
+                namespaceId,
+                groupId,
+                "checkout",
+                page,
+            )
+        }
     }
 
     @Test
     fun `global filter does not include grouped features`() {
         val page = PageRequest.of(0, 20)
-        `when`(featureRepository.findAllByNamespaceIdAndGroupIdIsNull(namespaceId, page))
-            .thenReturn(PageImpl(listOf(booleanFeature(1)), page, 1))
+        every { featureRepository.findAllByNamespaceIdAndGroupIdIsNull(namespaceId, page) } returns
+            PageImpl(listOf(booleanFeature(1)), page, 1)
 
         val result = service.listForAdmin("blue", page, null, globalOnly = true)
 
-        assertEquals(null, result.content.single().group)
-        verify(featureRepository).findAllByNamespaceIdAndGroupIdIsNull(namespaceId, page)
+        assertThat(result.content.single().group).isNull()
+        verify(exactly = 1) { featureRepository.findAllByNamespaceIdAndGroupIdIsNull(namespaceId, page) }
     }
 
     @Test
     fun `new namespace is never default`() {
-        `when`(namespaceRepository.save(org.mockito.ArgumentMatchers.any(Namespace::class.java)))
-            .thenAnswer { it.getArgument<Namespace>(0).copy(id = UUID.randomUUID()) }
+        every { namespaceRepository.save(any<Namespace>()) } answers { arg<Namespace>(0).copy(id = UUID.randomUUID()) }
 
         val created = service.createNamespace(CreateNamespaceRequest("green", "Green"))
 
-        assertEquals(false, created.defaultNamespace)
-        val saved = ArgumentCaptor.forClass(Namespace::class.java)
-        verify(namespaceRepository).save(saved.capture())
-        assertEquals(false, saved.value.defaultNamespace)
+        assertThat(created.defaultNamespace).isEqualTo(false)
+        val saved = slot<Namespace>()
+        verify(exactly = 1) { namespaceRepository.save(capture(saved)) }
+        assertThat(saved.captured.defaultNamespace).isEqualTo(false)
     }
 
     @Test
     fun `system default namespace cannot be created through service`() {
         val error =
-            assertThrows(DomainValidationException::class.java) {
+            catchThrowableOfType(DomainValidationException::class.java) {
                 service.createNamespace(CreateNamespaceRequest("default", "Replacement"))
-            }
+            }.also { assertThat(it).isNotNull() }
 
-        assertEquals("key", error.violations.single().first)
-        verify(namespaceRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        assertThat(error.violations.single().first).isEqualTo("key")
+        verify(exactly = 0) { namespaceRepository.save(any()) }
     }
 
     @Test
     fun `delete feature requires current version`() {
         val feature = booleanFeature(3)
-        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
-        assertThrows(ConflictException::class.java) { service.deleteFeature("blue", feature.key, null, 2) }
-        assertThrows(DomainValidationException::class.java) { service.deleteFeature("blue", feature.key, null, null) }
-        verify(featureRepository, never()).delete(feature)
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) } returns feature
+        catchThrowableOfType(ConflictException::class.java) {
+            service.deleteFeature("blue", feature.key, null, 2)
+        }.also { assertThat(it).isNotNull() }
+        catchThrowableOfType(DomainValidationException::class.java) {
+            service.deleteFeature("blue", feature.key, null, null)
+        }.also { assertThat(it).isNotNull() }
+        verify(exactly = 0) { featureRepository.delete(feature) }
         service.deleteFeature("blue", feature.key, null, 3)
-        verify(featureRepository).delete(feature)
+        verify(exactly = 1) { featureRepository.delete(feature) }
     }
 
     @Test
@@ -425,24 +417,28 @@ class FeatureToggleServiceTests {
                 createdAt = now,
                 updatedAt = now,
             )
-        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, group.key)).thenReturn(group)
-        assertThrows(ConflictException::class.java) { service.deleteGroup("blue", group.key, 2) }
-        assertThrows(DomainValidationException::class.java) { service.deleteGroup("blue", group.key, null) }
-        verify(groupRepository, never()).delete(group)
+        every { groupRepository.findByNamespaceIdAndKey(namespaceId, group.key) } returns group
+        catchThrowableOfType(
+            ConflictException::class.java,
+        ) { service.deleteGroup("blue", group.key, 2) }.also { assertThat(it).isNotNull() }
+        catchThrowableOfType(DomainValidationException::class.java) {
+            service.deleteGroup("blue", group.key, null)
+        }.also { assertThat(it).isNotNull() }
+        verify(exactly = 0) { groupRepository.delete(group) }
         service.deleteGroup("blue", group.key, 3)
-        verify(groupRepository).delete(group)
+        verify(exactly = 1) { groupRepository.delete(group) }
     }
 
     @Test
     fun `delete namespace rejects default and unknown namespace`() {
         val default = Namespace(UUID.randomUUID(), "default", "Default", true, now, now, true)
-        `when`(namespaceRepository.findByKey("default")).thenReturn(default)
-        assertThrows(ConflictException::class.java) { service.deleteNamespace("default") }
-        assertThrows(NotFoundException::class.java) { service.deleteNamespace("missing") }
-        verify(namespaceRepository, never()).delete(default)
+        every { namespaceRepository.findByKey("default") } returns default
+        catchThrowableOfType(ConflictException::class.java) { service.deleteNamespace("default") }.also { assertThat(it).isNotNull() }
+        catchThrowableOfType(NotFoundException::class.java) { service.deleteNamespace("missing") }.also { assertThat(it).isNotNull() }
+        verify(exactly = 0) { namespaceRepository.delete(default) }
         service.deleteNamespace("blue")
         val blue = Namespace(namespaceId, "blue", "Blue", true, now, now)
-        verify(namespaceRepository).delete(blue)
+        verify(exactly = 1) { namespaceRepository.delete(blue) }
     }
 
     private fun booleanFeature(version: Long) =

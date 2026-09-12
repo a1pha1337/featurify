@@ -1,5 +1,6 @@
 package ru.a1pha1337.featurify.controller
 
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.springframework.beans.factory.annotation.Autowired
@@ -11,12 +12,10 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.annotation.Transactional
 import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.service.FeatureToggleService
+import tools.jackson.databind.json.JsonMapper
 import java.util.UUID
 
 @SpringBootTest(properties = ["spring.grpc.server.enabled=false", "vaadin.productionMode=true"])
@@ -35,9 +34,9 @@ class AccessTokenSecurityDatabaseTests {
         val path = "/api/v1/namespaces/default/tokens"
         mvc
             .perform(post(path).contentType(MediaType.APPLICATION_JSON).content("""{"name":"backend"}"""))
-            .andExpect(status().isUnauthorized)
-        mvc.perform(get(path)).andExpect(status().isUnauthorized)
-        mvc.perform(delete("$path/${UUID.randomUUID()}")).andExpect(status().isUnauthorized)
+            .andExpect { assertThat(it.response.status).isEqualTo(401) }
+        mvc.perform(get(path)).andExpect { assertThat(it.response.status).isEqualTo(401) }
+        mvc.perform(delete("$path/${UUID.randomUUID()}")).andExpect { assertThat(it.response.status).isEqualTo(401) }
     }
 
     @Test
@@ -46,14 +45,14 @@ class AccessTokenSecurityDatabaseTests {
         val path = "/api/v1/namespaces/${namespace.key}/tokens"
         mvc
             .perform(post(path).with(jwt()).contentType(MediaType.APPLICATION_JSON).content("""{"name":"backend"}"""))
-            .andExpect(status().isCreated)
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(jsonPath("$.token").isString)
-            .andExpect(jsonPath("$.tokenHash").doesNotExist())
+            .andExpect { assertThat(it.response.status).isEqualTo(201) }
+            .andExpect { assertThat(it.response.getHeader("Cache-Control")).isEqualTo("no-store") }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/token").isString).isTrue() }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/tokenHash").isMissingNode).isTrue() }
         mvc
             .perform(get(path).with(jwt()))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$[0].name").value("backend"))
-            .andExpect(jsonPath("$[0].token").doesNotExist())
+            .andExpect { assertThat(it.response.status).isEqualTo(200) }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/0/name").asString()).isEqualTo("backend") }
+            .andExpect { assertThat(JsonMapper().readTree(it.response.contentAsString).at("/0/token").isMissingNode).isTrue() }
     }
 }
