@@ -12,19 +12,19 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
+import ru.a1pha1337.featurify.domain.BooleanValue
+import ru.a1pha1337.featurify.domain.EnumValue
 import ru.a1pha1337.featurify.domain.Feature
-import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
-import ru.a1pha1337.featurify.domain.FeatureVectorElement
 import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
-import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
 import ru.a1pha1337.featurify.repository.FeatureRepository
 import ru.a1pha1337.featurify.repository.NamespaceRepository
@@ -39,7 +39,6 @@ class FeatureToggleServiceTests {
     private val namespaceRepository = mockk<NamespaceRepository>(relaxed = true)
     private val featureRepository = mockk<FeatureRepository>(relaxed = true)
     private val groupRepository = mockk<FeatureGroupRepository>(relaxed = true)
-    private val optionRepository = mockk<FeatureEnumOptionRepository>(relaxed = true)
     private val auditRepository = mockk<FeatureAuditLogRepository>(relaxed = true)
     private val actorProvider = mockk<ActorProvider>(relaxed = true)
     private val now = Instant.parse("2026-09-11T12:00:00Z")
@@ -59,7 +58,6 @@ class FeatureToggleServiceTests {
                 namespaceRepository,
                 featureRepository,
                 groupRepository,
-                optionRepository,
                 auditRepository,
                 actorProvider,
                 Clock.fixed(now, ZoneOffset.UTC),
@@ -254,15 +252,12 @@ class FeatureToggleServiceTests {
                 id = featureId,
                 namespaceId = namespaceId,
                 key = "checkout.pet",
-                type = FeatureType.ENUM,
-                enumValue = "CAT",
+                value = EnumValue("CAT", listOf("CAT")),
                 version = 1,
                 createdAt = now,
                 updatedAt = now,
             )
         every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key) } returns feature
-        every { optionRepository.findAllByFeatureIdOrderBySortOrder(featureId) } returns
-            listOf(FeatureEnumOption(UUID.randomUUID(), featureId, "CAT", 0))
 
         catchThrowableOfType(DomainValidationException::class.java) {
             service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 1, enumValue = "DOG"))
@@ -448,8 +443,7 @@ class FeatureToggleServiceTests {
             id = featureId,
             namespaceId = namespaceId,
             key = "checkout.enabled",
-            type = FeatureType.BOOLEAN,
-            booleanValue = false,
+            value = BooleanValue(false),
             version = version,
             createdAt = now,
             updatedAt = now,
@@ -463,7 +457,6 @@ class FeatureToggleServiceTests {
         assertThat(created.type).isEqualTo(FeatureType.VECTOR)
         assertThat(created.value).isEqualTo(values)
         assertThat(created.enumOptions).isNull()
-        verify(exactly = 0) { optionRepository.saveAll(any<List<FeatureEnumOption>>()) }
     }
 
     @Test
@@ -471,13 +464,13 @@ class FeatureToggleServiceTests {
         every { auditRepository.save(any<ru.a1pha1337.featurify.domain.FeatureAuditLog>()) } answers { firstArg() }
         val current =
             booleanFeature(3).copy(
-                type = FeatureType.VECTOR,
-                booleanValue = null,
-                vectorElements =
-                    mapOf(
-                        "CAT" to FeatureVectorElement(true),
-                        "DOG" to FeatureVectorElement(false),
-                        "SHIP" to FeatureVectorElement(false),
+                value =
+                    VectorValue(
+                        mapOf(
+                            "CAT" to true,
+                            "DOG" to false,
+                            "SHIP" to false,
+                        ),
                     ),
             )
         every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns current
@@ -499,9 +492,7 @@ class FeatureToggleServiceTests {
     fun `vector lookup distinguishes disabled missing and wrong type`() {
         val current =
             booleanFeature(3).copy(
-                type = FeatureType.VECTOR,
-                booleanValue = null,
-                vectorElements = mapOf("DOG" to FeatureVectorElement(true), "SHIP" to FeatureVectorElement(false)),
+                value = VectorValue(mapOf("DOG" to true, "SHIP" to false)),
             )
         every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns current
         assertThat(service.getVectorElementInNamespace(namespaceId, current.key, null, "DOG").value).isTrue()
@@ -544,9 +535,7 @@ class FeatureToggleServiceTests {
     fun `vector patch rejects unknown elements stale versions and incompatible values`() {
         val current =
             booleanFeature(3).copy(
-                type = FeatureType.VECTOR,
-                booleanValue = null,
-                vectorElements = mapOf("DOG" to FeatureVectorElement(false)),
+                value = VectorValue(mapOf("DOG" to false)),
             )
         every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns current
         listOf(

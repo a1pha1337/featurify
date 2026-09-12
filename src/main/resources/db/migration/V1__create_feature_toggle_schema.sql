@@ -80,8 +80,6 @@ CREATE TABLE feature
     group_id      UUID,
     key           VARCHAR(255)  NOT NULL,
     type          VARCHAR(16)   NOT NULL,
-    boolean_value BOOLEAN,
-    enum_value    VARCHAR(255),
     description   VARCHAR(2000) NOT NULL DEFAULT '',
     version       BIGINT        NOT NULL DEFAULT 0,
     created_at    TIMESTAMPTZ   NOT NULL,
@@ -90,13 +88,7 @@ CREATE TABLE feature
         REFERENCES feature_group (id, namespace_id) ON DELETE CASCADE,
     CONSTRAINT ck_feature_key CHECK (key ~ '^[A-Za-z]([A-Za-z0-9]|[.-][A-Za-z0-9])*$'),
     CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM', 'VECTOR')),
-    CONSTRAINT ck_feature_typed_value CHECK (
-        (type = 'BOOLEAN' AND boolean_value IS NOT NULL AND enum_value IS NULL)
-            OR
-        (type = 'ENUM' AND boolean_value IS NULL AND enum_value IS NOT NULL)
-            OR
-        (type = 'VECTOR' AND boolean_value IS NULL AND enum_value IS NULL)
-        )
+    CONSTRAINT uq_feature_id_type UNIQUE (id, type)
 );
 
 CREATE UNIQUE INDEX uq_feature_namespace_group_key
@@ -112,26 +104,116 @@ CREATE INDEX ix_feature_namespace_key ON feature (namespace_id, group_id, key);
 CREATE INDEX ix_feature_key_trgm
     ON feature USING GIN (key gin_trgm_ops);
 
+CREATE TABLE feature_boolean_value
+(
+    feature_id UUID PRIMARY KEY,
+    feature_type VARCHAR(16) GENERATED ALWAYS AS ('BOOLEAN') STORED,
+    enabled BOOLEAN NOT NULL,
+    CONSTRAINT fk_boolean_feature_type FOREIGN KEY (feature_id, feature_type)
+        REFERENCES feature (id, type) ON DELETE CASCADE
+);
+
 CREATE TABLE feature_enum_option
 (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    feature_id UUID         NOT NULL REFERENCES feature (id) ON DELETE CASCADE,
-    value      VARCHAR(255) NOT NULL,
-    sort_order INTEGER      NOT NULL,
-    CONSTRAINT uq_feature_enum_option_value UNIQUE (feature_id, value),
+    feature_id UUID NOT NULL,
+    feature_type VARCHAR(16) GENERATED ALWAYS AS ('ENUM') STORED,
+    value VARCHAR(255) NOT NULL,
+    sort_order INTEGER NOT NULL,
+    PRIMARY KEY (feature_id, value),
+    CONSTRAINT fk_enum_option_feature_type FOREIGN KEY (feature_id, feature_type)
+        REFERENCES feature (id, type) ON DELETE CASCADE,
     CONSTRAINT uq_feature_enum_option_order UNIQUE (feature_id, sort_order),
-    CONSTRAINT ck_feature_enum_option_value CHECK (value <> ''),
-    CONSTRAINT ck_feature_enum_option_order CHECK (sort_order >= 0)
+    CONSTRAINT ck_feature_enum_option_value CHECK (length(trim(value)) > 0),
+    CONSTRAINT ck_feature_enum_option_order CHECK (sort_order BETWEEN 0 AND 99)
+);
+
+CREATE TABLE feature_enum_value
+(
+    feature_id UUID PRIMARY KEY,
+    feature_type VARCHAR(16) GENERATED ALWAYS AS ('ENUM') STORED,
+    value VARCHAR(255) NOT NULL,
+    CONSTRAINT fk_enum_feature_type FOREIGN KEY (feature_id, feature_type)
+        REFERENCES feature (id, type) ON DELETE CASCADE,
+    CONSTRAINT fk_enum_selected_option FOREIGN KEY (feature_id, value)
+        REFERENCES feature_enum_option (feature_id, value) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE feature_vector_element
 (
-    feature_id UUID NOT NULL REFERENCES feature (id) ON DELETE CASCADE,
+    feature_id UUID NOT NULL,
+    feature_type VARCHAR(16) GENERATED ALWAYS AS ('VECTOR') STORED,
     element VARCHAR(255) NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (feature_id, element),
+    CONSTRAINT fk_vector_feature_type FOREIGN KEY (feature_id, feature_type)
+        REFERENCES feature (id, type) ON DELETE CASCADE,
     CONSTRAINT ck_vector_element_name CHECK (length(trim(element)) > 0 AND element = trim(element))
 );
+
+-- JDBC writes the parent and its children in separate statements. Enforce complete
+-- typed values at transaction end, allowing atomic replacement of child rows.
+CREATE FUNCTION check_feature_value(target_id UUID)
+    RETURNS VOID
+    LANGUAGE plpgsql
+AS
+$$
+DECLARE
+    target_type VARCHAR(16);
+    element_count INTEGER;
+BEGIN
+    SELECT type INTO target_type FROM feature WHERE id = target_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN; -- Parent deletion cascades to all value tables.
+    END IF;
+    IF target_type = 'BOOLEAN' AND NOT EXISTS (SELECT 1 FROM feature_boolean_value WHERE feature_id = target_id) THEN
+        RAISE EXCEPTION 'BOOLEAN feature requires a value' USING ERRCODE = '23514';
+    ELSIF target_type = 'ENUM' AND NOT EXISTS (SELECT 1 FROM feature_enum_value WHERE feature_id = target_id) THEN
+        RAISE EXCEPTION 'ENUM feature requires a selected value' USING ERRCODE = '23514';
+    ELSIF target_type = 'VECTOR' THEN
+        SELECT count(*) INTO element_count FROM feature_vector_element WHERE feature_id = target_id;
+        IF element_count NOT BETWEEN 1 AND 100 THEN
+            RAISE EXCEPTION 'VECTOR feature requires between 1 and 100 elements' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+END;
+$$;
+
+CREATE FUNCTION enforce_feature_value()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+AS
+$$
+DECLARE
+    id_field TEXT := CASE WHEN TG_TABLE_NAME = 'feature' THEN 'id' ELSE 'feature_id' END;
+    old_id UUID;
+    new_id UUID;
+BEGIN
+    IF TG_OP <> 'INSERT' THEN
+        old_id := (to_jsonb(OLD) ->> id_field)::UUID;
+        PERFORM check_feature_value(old_id);
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        new_id := (to_jsonb(NEW) ->> id_field)::UUID;
+        IF new_id IS DISTINCT FROM old_id THEN
+            PERFORM check_feature_value(new_id);
+        END IF;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER trg_feature_value_required
+    AFTER INSERT OR UPDATE OR DELETE ON feature DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION enforce_feature_value();
+CREATE CONSTRAINT TRIGGER trg_boolean_value_required
+    AFTER INSERT OR UPDATE OR DELETE ON feature_boolean_value DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION enforce_feature_value();
+CREATE CONSTRAINT TRIGGER trg_enum_value_required
+    AFTER INSERT OR UPDATE OR DELETE ON feature_enum_value DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION enforce_feature_value();
+CREATE CONSTRAINT TRIGGER trg_vector_value_required
+    AFTER INSERT OR UPDATE OR DELETE ON feature_vector_element DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION enforce_feature_value();
 
 CREATE TABLE feature_audit_log
 (

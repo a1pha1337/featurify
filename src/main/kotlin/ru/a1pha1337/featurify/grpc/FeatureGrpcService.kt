@@ -6,7 +6,10 @@ import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.TransientDataAccessException
 import org.springframework.grpc.server.service.GrpcService
+import ru.a1pha1337.featurify.domain.BooleanValue
+import ru.a1pha1337.featurify.domain.EnumValue
 import ru.a1pha1337.featurify.domain.FeatureType
+import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
@@ -34,7 +37,7 @@ class FeatureGrpcService(
         }
         BooleanFeatureResponse
             .newBuilder()
-            .setValue(feature.booleanValue!!)
+            .setValue((feature.value as BooleanValue).enabled)
             .setVersion(feature.version ?: 0)
             .build()
     }
@@ -53,7 +56,7 @@ class FeatureGrpcService(
         }
         EnumFeatureResponse
             .newBuilder()
-            .setValue(feature.enumValue!!)
+            .setValue((feature.value as EnumValue).selected)
             .setVersion(feature.version ?: 0)
             .build()
     }
@@ -69,10 +72,10 @@ class FeatureGrpcService(
         if (feature.type != FeatureType.VECTOR) {
             throw GrpcErrors.exception(Status.FAILED_PRECONDITION, "FEATURE_TYPE_MISMATCH", "Feature is not VECTOR")
         }
-        val element = feature.vectorElements[request.element] ?: throw NotFoundException("Vector element was not found")
+        val element = (feature.value as VectorValue).elements[request.element] ?: throw NotFoundException("Vector element was not found")
         BooleanFeatureResponse
             .newBuilder()
-            .setValue(element.enabled)
+            .setValue(element)
             .setVersion(feature.version ?: 0)
             .build()
     }

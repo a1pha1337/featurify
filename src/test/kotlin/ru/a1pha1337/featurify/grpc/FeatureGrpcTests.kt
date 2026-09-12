@@ -21,12 +21,13 @@ import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import ru.a1pha1337.featurify.domain.BooleanValue
+import ru.a1pha1337.featurify.domain.EnumValue
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureGroup
-import ru.a1pha1337.featurify.domain.FeatureType
-import ru.a1pha1337.featurify.domain.FeatureVectorElement
 import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.domain.NamespaceAccessToken
+import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
@@ -88,23 +89,20 @@ class FeatureGrpcTests {
                 UUID.randomUUID(),
                 blue.id!!,
                 "enabled",
-                FeatureType.BOOLEAN,
+                BooleanValue(false),
                 groupId = blueGroup.id,
-                booleanValue = false,
                 version = 7,
                 createdAt = now,
                 updatedAt = now,
             )
         every { features.findByNamespaceIdAndGroupIdAndKey(blue.id!!, blueGroup.id!!, "enabled") } returns flag
         every { features.findByNamespaceIdAndGroupIdAndKey(red.id!!, redGroup.id!!, "enabled") } returns
-            flag.copy(namespaceId = red.id!!, groupId = redGroup.id, booleanValue = true)
+            flag.copy(namespaceId = red.id!!, groupId = redGroup.id, value = BooleanValue(true))
         every { features.findByNamespaceIdAndGroupIdIsNullAndKey(blue.id!!, "color") } returns
             flag.copy(
                 key = "color",
                 groupId = null,
-                type = FeatureType.ENUM,
-                booleanValue = null,
-                enumValue = "GREEN",
+                value = EnumValue("GREEN", listOf("GREEN")),
             )
         tokenService = AccessTokenService(tokenRepository, namespaces, Clock.systemUTC())
         blueToken = tokenService.create("blue", CreateAccessTokenRequest("backend")).token
@@ -296,16 +294,17 @@ class FeatureGrpcTests {
                 UUID.randomUUID(),
                 blue.id!!,
                 "feat",
-                FeatureType.VECTOR,
                 groupId = blueGroup.id,
                 version = 4,
                 createdAt = now,
                 updatedAt = now,
-                vectorElements =
-                    mapOf(
-                        "CAT" to FeatureVectorElement(true),
-                        "DOG" to FeatureVectorElement(true),
-                        "SHIP" to FeatureVectorElement(false),
+                value =
+                    VectorValue(
+                        mapOf(
+                            "CAT" to true,
+                            "DOG" to true,
+                            "SHIP" to false,
+                        ),
                     ),
             )
         every { features.findByNamespaceIdAndGroupIdAndKey(blue.id!!, blueGroup.id!!, "feat") } returns vector
@@ -313,7 +312,7 @@ class FeatureGrpcTests {
             vector.copy(
                 namespaceId = red.id!!,
                 groupId = redGroup.id,
-                vectorElements = mapOf("DOG" to FeatureVectorElement(false)),
+                value = VectorValue(mapOf("DOG" to false)),
             )
 
         fun vectorRequest(element: String) =

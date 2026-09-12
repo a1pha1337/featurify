@@ -6,13 +6,14 @@ import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import ru.a1pha1337.featurify.domain.AuditOperation
+import ru.a1pha1337.featurify.domain.BooleanValue
+import ru.a1pha1337.featurify.domain.EnumValue
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureAuditLog
-import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
-import ru.a1pha1337.featurify.domain.FeatureVectorElement
 import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
 import ru.a1pha1337.featurify.dto.AuditLogResponse
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
@@ -27,7 +28,6 @@ import ru.a1pha1337.featurify.dto.ResolveResponse
 import ru.a1pha1337.featurify.dto.ValidationPatterns
 import ru.a1pha1337.featurify.dto.VectorElementResponse
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
-import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
 import ru.a1pha1337.featurify.repository.FeatureRepository
 import ru.a1pha1337.featurify.repository.NamespaceRepository
@@ -40,7 +40,6 @@ class FeatureToggleService(
     private val namespaceRepository: NamespaceRepository,
     private val featureRepository: FeatureRepository,
     private val groupRepository: FeatureGroupRepository,
-    private val optionRepository: FeatureEnumOptionRepository,
     private val auditRepository: FeatureAuditLogRepository,
     private val actorProvider: ActorProvider,
     private val clock: Clock,
@@ -165,24 +164,18 @@ class FeatureToggleService(
                 Feature(
                     namespaceId = namespace.id!!,
                     key = key,
-                    type = type,
+                    value =
+                        when (type) {
+                            FeatureType.BOOLEAN -> BooleanValue(request.booleanValue!!)
+                            FeatureType.ENUM -> EnumValue(request.enumValue!!, request.enumOptions)
+                            FeatureType.VECTOR -> VectorValue(request.vectorValues)
+                        },
                     groupId = group?.id,
-                    booleanValue = request.booleanValue,
-                    enumValue = request.enumValue,
-                    vectorElements = request.vectorValues.mapValues { FeatureVectorElement(it.value) },
                     description = request.description,
                     createdAt = now,
                     updatedAt = now,
                 ),
             )
-        if (type == FeatureType.ENUM) {
-            val featureId = checkNotNull(saved.id)
-            optionRepository.saveAll(
-                request.enumOptions.mapIndexed { index, value ->
-                    FeatureEnumOption(featureId = featureId, value = value, sortOrder = index)
-                },
-            )
-        }
         return saved.toAdminResponse(group?.key, optionsFor(saved))
     }
 
@@ -246,8 +239,8 @@ class FeatureToggleService(
         if (element.isBlank() || element.length > 255) throw validation("element", "must contain 1-255 characters")
         val feature = requireFeature(namespaceId, key, normalizeGroup(group))
         if (feature.type != FeatureType.VECTOR) throw ConflictException("Feature is not VECTOR")
-        val value = feature.vectorElements[element] ?: throw NotFoundException("Vector element was not found")
-        return VectorElementResponse(groupKeyFor(feature), feature.key, element, value.enabled, feature.version ?: 0)
+        val value = (feature.value as VectorValue).elements[element] ?: throw NotFoundException("Vector element was not found")
+        return VectorElementResponse(groupKeyFor(feature), feature.key, element, value, feature.version ?: 0)
     }
 
     @Transactional(readOnly = true)
@@ -345,25 +338,19 @@ class FeatureToggleService(
         requireVersion(current, request.version)
         validatePatch(current, request)
 
-        val newBoolean = if (current.type == FeatureType.BOOLEAN) request.booleanValue ?: current.booleanValue else null
-        val newEnum = if (current.type == FeatureType.ENUM) request.enumValue ?: current.enumValue else null
-        if (current.type == FeatureType.ENUM && request.enumValue != null) {
-            val allowed = optionsFor(current)
-            if (request.enumValue !in allowed) throw validation("enumValue", "must be one of $allowed")
-        }
-
+        val newValue =
+            when (val value = current.value) {
+                is BooleanValue -> value.copy(enabled = request.booleanValue ?: value.enabled)
+                is EnumValue -> {
+                    val selected = request.enumValue ?: value.selected
+                    if (selected !in value.options) throw validation("enumValue", "must be one of ${value.options}")
+                    value.copy(selected = selected)
+                }
+                is VectorValue -> value.copy(elements = value.elements + (request.vectorValues ?: emptyMap()))
+            }
         val changed =
             current.copy(
-                booleanValue = newBoolean,
-                enumValue = newEnum,
-                vectorElements =
-                    current.vectorElements + (
-                        request.vectorValues?.mapValues {
-                            FeatureVectorElement(
-                                it.value,
-                            )
-                        } ?: emptyMap()
-                    ),
+                value = newValue,
                 description = request.description ?: current.description,
                 updatedAt = clock.instant(),
             )
@@ -483,7 +470,7 @@ class FeatureToggleService(
         request.vectorValues?.let { values ->
             if (current.type != FeatureType.VECTOR) throw validation("vectorValues", "is only allowed for VECTOR")
             validateVectorValues(values)
-            if (values.keys.any { it !in current.vectorElements }) {
+            if (values.keys.any { it !in (current.value as VectorValue).elements }) {
                 throw validation("vectorValues", "must contain only existing elements")
             }
         }
@@ -615,12 +602,7 @@ class FeatureToggleService(
             groupRepository.findById(it).orElse(null)?.key
         }
 
-    private fun optionsFor(feature: Feature): List<String> =
-        if (feature.type == FeatureType.ENUM) {
-            optionRepository.findAllByFeatureIdOrderBySortOrder(feature.id!!).map { it.value }
-        } else {
-            emptyList()
-        }
+    private fun optionsFor(feature: Feature): List<String> = (feature.value as? EnumValue)?.options ?: emptyList()
 
     private fun normalizeQuery(query: String?): String? {
         val normalized = query?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
@@ -647,7 +629,7 @@ class FeatureToggleService(
         group = group,
         key = key,
         type = type,
-        value = value(),
+        value = value.publicValue(),
         enumOptions = options.takeIf { type == FeatureType.ENUM },
         version = version ?: 0,
     )
@@ -659,7 +641,7 @@ class FeatureToggleService(
         group = group,
         key = key,
         type = type,
-        value = value(),
+        value = value.publicValue(),
         enumOptions = options.takeIf { type == FeatureType.ENUM },
         description = description,
         version = version ?: 0,

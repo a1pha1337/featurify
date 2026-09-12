@@ -27,7 +27,12 @@ import java.util.UUID
 /** Opt-in PostgreSQL test. Spring rolls back all data created by this test. */
 @DataJdbcTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(FeatureToggleService::class, AccessTokenService::class, TimeConfiguration::class)
+@Import(
+    FeatureToggleService::class,
+    AccessTokenService::class,
+    TimeConfiguration::class,
+    ru.a1pha1337.featurify.repository.FeatureRepository::class,
+)
 @EnabledIfEnvironmentVariable(named = "FEATURIFY_DB_TESTS", matches = "true")
 class FeatureGroupDatabaseTests {
     @Autowired
