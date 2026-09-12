@@ -25,11 +25,13 @@ class TokenAuthenticationInterceptor(private val tokens: AccessTokenService) : S
         } catch (exception: RuntimeException) {
             // Never include metadata or credentials in logs or error descriptions.
             LoggerFactory.getLogger(javaClass).error("Access token authentication storage failed")
-            call.close(Status.UNAVAILABLE.withDescription("Authentication temporarily unavailable"), Metadata())
+            val error = GrpcErrors.exception(Status.UNAVAILABLE, "SERVICE_UNAVAILABLE", "Authentication temporarily unavailable")
+            call.close(error.status, error.trailers ?: Metadata())
             return object : ServerCall.Listener<ReqT>() {}
         }
         if (namespace == null) {
-            call.close(Status.UNAUTHENTICATED.withDescription("A valid namespace access token is required"), Metadata())
+            val error = GrpcErrors.exception(Status.UNAUTHENTICATED, "UNAUTHORIZED", "A valid namespace access token is required")
+            call.close(error.status, error.trailers ?: Metadata())
             return object : ServerCall.Listener<ReqT>() {}
         }
         return Contexts.interceptCall(Context.current().withValue(NAMESPACE, namespace), call, headers, next)

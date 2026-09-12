@@ -4,6 +4,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import ru.a1pha1337.featurify.domain.NamespaceAccessToken
+import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.dto.*
 import ru.a1pha1337.featurify.repository.NamespaceAccessTokenRepository
 import ru.a1pha1337.featurify.repository.NamespaceRepository
@@ -50,12 +51,15 @@ class AccessTokenService(
     }
 
     @Transactional(readOnly = true)
-    fun authenticate(rawToken: String): UUID? {
+    fun authenticate(rawToken: String): UUID? = authenticateNamespace(rawToken)?.id
+
+    @Transactional(readOnly = true)
+    fun authenticateNamespace(rawToken: String): Namespace? {
         val match = tokenPattern.matchEntire(rawToken) ?: return null
         val token = tokens.findById(UUID.fromString(match.groupValues[1])).orElse(null) ?: return null
         if (!encoder.matches(match.groupValues[2], token.tokenHash)) return null
         val namespace = namespaces.findById(token.namespaceId).orElse(null) ?: return null
-        return namespace.id.takeIf { namespace.active }
+        return namespace.takeIf { it.active }
     }
 
     private fun requireNamespace(key: String) = namespaces.findByKey(key)

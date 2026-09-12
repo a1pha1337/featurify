@@ -6,6 +6,9 @@ import io.grpc.Status
 import io.grpc.StatusRuntimeException
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import io.grpc.stub.MetadataUtils
+import io.grpc.protobuf.StatusProto
+import com.google.rpc.ErrorInfo
+import com.google.rpc.BadRequest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -85,5 +88,17 @@ open class GrpcServerDatabaseTests {
             assertThrows(StatusRuntimeException::class.java) {
                 stub(token.token).getBooleanFeature(request("a".repeat(17 * 1024)))
             }.status.code)
+    }
+
+    @Test
+    fun `standard rich error details reach clients through Spring transport`() {
+        val (_, token) = namespace(true)
+        val invalid = assertThrows(StatusRuntimeException::class.java) { stub(token.token).getBooleanFeature(request("")) }
+        val status = StatusProto.fromThrowable(invalid)!!
+        assertEquals(Status.Code.INVALID_ARGUMENT.value(), status.code)
+        assertEquals("VALIDATION_ERROR", status.detailsList.first { it.`is`(ErrorInfo::class.java) }.unpack(ErrorInfo::class.java).reason)
+        assertEquals("key", status.detailsList.first { it.`is`(BadRequest::class.java) }.unpack(BadRequest::class.java).fieldViolationsList.single().field)
+        val unauthorized = assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request()) }
+        assertEquals("UNAUTHORIZED", StatusProto.fromThrowable(unauthorized)!!.detailsList.single().unpack(ErrorInfo::class.java).reason)
     }
 }

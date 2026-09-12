@@ -4,6 +4,9 @@ import io.grpc.*
 import io.grpc.inprocess.InProcessChannelBuilder
 import io.grpc.inprocess.InProcessServerBuilder
 import io.grpc.stub.MetadataUtils
+import io.grpc.protobuf.StatusProto
+import com.google.rpc.BadRequest
+import com.google.rpc.ErrorInfo
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.AfterEach
@@ -151,5 +154,30 @@ class FeatureGrpcTests {
         assertNull(tokenService.authenticate(extra.token))
         assertEquals(blue.id, tokenService.authenticate(blueToken))
         assertThrows(NotFoundException::class.java) { tokenService.revoke("red", extra.id) }
+    }
+
+    @Test
+    fun `rich errors carry standard status error info and validation fields`() {
+        val invalid = assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request(key = "")) }
+        val detail = StatusProto.fromThrowable(invalid)!!
+        assertEquals(Status.Code.INVALID_ARGUMENT.value(), detail.code)
+        val info = detail.detailsList.first { it.`is`(ErrorInfo::class.java) }.unpack(ErrorInfo::class.java)
+        assertEquals("featurify", info.domain)
+        assertEquals("VALIDATION_ERROR", info.reason)
+        val fields = detail.detailsList.first { it.`is`(BadRequest::class.java) }.unpack(BadRequest::class.java)
+        assertEquals("key", fields.fieldViolationsList.single().field)
+        val unauthorized = assertThrows(StatusRuntimeException::class.java) { stub(null).getBooleanFeature(request()) }
+        assertEquals("UNAUTHORIZED", StatusProto.fromThrowable(unauthorized)!!.detailsList.single().unpack(ErrorInfo::class.java).reason)
+        val mismatch = assertThrows(StatusRuntimeException::class.java) { stub().getEnumFeature(request()) }
+        assertEquals("FEATURE_TYPE_MISMATCH", StatusProto.fromThrowable(mismatch)!!.detailsList.single().unpack(ErrorInfo::class.java).reason)
+    }
+
+    @Test
+    fun `authentication storage failure is unavailable with safe rich details`() {
+        `when`(tokenRepository.findById(any(UUID::class.java))).thenThrow(org.springframework.dao.DataAccessResourceFailureException("private"))
+        val error = assertThrows(StatusRuntimeException::class.java) { stub().getBooleanFeature(request()) }
+        assertEquals(Status.Code.UNAVAILABLE, error.status.code)
+        assertEquals("SERVICE_UNAVAILABLE", StatusProto.fromThrowable(error)!!.detailsList.single().unpack(ErrorInfo::class.java).reason)
+        assertFalse(error.message!!.contains("private"))
     }
 }

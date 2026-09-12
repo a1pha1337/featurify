@@ -12,7 +12,7 @@
 
 - типы `BOOLEAN` и `ENUM`;
 - независимые ключи и значения в каждом namespace'е;
-- публичный read-only REST API;
+- read-only REST API для бекендов с namespace-токенами;
 - административный REST API и Vaadin UI;
 - optimistic locking по обязательному полю `version`;
 - полное удаление фич, групп и namespace с каскадным удалением вложенных данных;
@@ -102,13 +102,30 @@ docker compose up -d postgres keycloak
 
 ## REST API
 
-Публичные endpoints не требуют токена:
+Read-only endpoints (`PublicFeatureController`) требуют namespace-токен в
+`Authorization: Bearer <token>`, тот же, что используется для gRPC:
 
 ```text
 GET /api/v1/features?namespace={namespaceKey}&page=0&size=20&query=checkout
 GET /api/v1/features/{key}?namespace={namespaceKey}&group={groupKey}
 GET /api/v1/features:resolve?namespace={namespaceKey}&group={groupKey}&keys=a,b,c
 ```
+
+Namespace определяется токеном. Параметр `namespace` можно опустить; если он указан,
+он должен совпадать с ключом namespace токена, иначе ответ — `403 Forbidden`.
+Запросы к БД ограничены UUID namespace токена. Отсутствующий, неверный или отозванный
+токен, удалённый или неактивный namespace дают `401 Unauthorized`.
+Keycloak JWT и browser session сами по себе не дают доступа к этим endpoints.
+Правило также действует для HEAD. Токены передаются только в заголовке, не в URL.
+
+| Интерфейс | Авторизация | Область доступа |
+|---|---|---|
+| `AccessTokenController` | Keycloak JWT или OAuth2 login session | Управление токенами |
+| `AdminFeatureController` (включая историю, группы и namespace) | Keycloak JWT или OAuth2 login session | Администрирование |
+| `PublicFeatureController` | Namespace-токен | Только чтение в namespace токена |
+| gRPC `FeatureService` | Namespace-токен в metadata `authorization` | Только чтение в namespace токена |
+
+Namespace-токены не предоставляют административных прав и не сохраняются в HTTP-сессии.
 
 Admin endpoints принимают Keycloak Bearer token либо browser OAuth2 session:
 
@@ -159,20 +176,43 @@ GET   /api/v1/features/{key}/history?namespace={namespaceKey}&group={groupKey}
 Удалённые ключи можно использовать повторно. DELETE системного `default` возвращает `409 Conflict`.
 DB-триггеры также запрещают его изменение, прямой DELETE и TRUNCATE таблицы namespace.
 
-Все REST-ошибки имеют единый вид:
+Все REST-ошибки, включая ошибки авторизации и стандартные ошибки Spring MVC,
+возвращаются как `application/problem+json` по [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html).
+HTTP status совпадает с полем `status`. Успешные ответы сохраняют существующие DTO,
+списки и страницы: RFC 9457 описывает только ошибки.
 
 ```json
 {
+  "type": "urn:featurify:problem:validation-error",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "Request validation failed",
+  "instance": "/api/v1/features",
   "code": "VALIDATION_ERROR",
-  "message": "Request validation failed",
   "details": [{"field":"enumValue","message":"must be present in enumOptions"}]
 }
 ```
 
+`type` — стабильный идентификатор вида ошибки; `code` — машинный код расширения.
+`details` присутствует при ошибках валидации, `instance` содержит путь запроса без query.
+Клиенты должны ориентироваться на HTTP status и `type`/`code`, а не разбирать `detail`.
+Старое поле `message` заменено на `detail`. Ошибки не содержат секретов и stack trace.
+
+| HTTP status | `code` |
+|---|---|
+| 400 | `VALIDATION_ERROR`, `MALFORMED_JSON` |
+| 401 / 403 | `UNAUTHORIZED` / `FORBIDDEN` |
+| 404 / 409 | `NOT_FOUND` / `CONFLICT` |
+| 405 / 406 / 415 | `METHOD_NOT_ALLOWED` / `NOT_ACCEPTABLE` / `UNSUPPORTED_MEDIA_TYPE` |
+| 500 / 503 | `INTERNAL_ERROR` / `SERVICE_UNAVAILABLE` |
+
+Ответы 401 содержат `WWW-Authenticate: Bearer`; ответы с ошибками имеют `Cache-Control: no-store`.
+
 Устаревшая версия возвращает `409 Conflict`; неизвестная или удалённая фича в публичном API — `404 Not Found`.
 Список фич возвращается как Spring Data `Page`: элементы находятся в `content`, рядом передаются метаданные страницы и общее количество элементов.
 Номер страницы начинается с нуля, размер страницы по умолчанию равен 20; сортировка по умолчанию выполняется по `key`.
-Параметр `namespace` необязателен во всех feature endpoints: без него используется default namespace.
+В административных feature endpoints без `namespace` используется default namespace.
+В read-only endpoints без `namespace` используется namespace предъявленного токена.
 Поле `group` при создании и query-параметр `group` в одиночных feature endpoints необязательны.
 Без группы фича считается глобальной в namespace; уникальность обеспечивается по `(namespace, group, key)`,
 причём для глобальных фич — отдельно по `(namespace, key)`.
@@ -256,8 +296,35 @@ TLS-профиль не позволит приложению запустить
 TLS на gRPC-сервере либо на доверенном прокси, а для выдачи токенов через REST/UI — HTTPS.
 Внешний TLS-прокси должен поддерживать gRPC/HTTP2 и передавать `authorization`.
 
-Существующий публичный REST API чтения фич сохраняется. Новая токенная авторизация
-применяется к gRPC, а административный REST API продолжает использовать Keycloak.
+REST-чтение фич и gRPC используют одни namespace-токены. Административный REST API
+продолжает использовать Keycloak.
+
+### Ошибки gRPC и будущий клиентский стартер
+
+Для gRPC применяется [стандартная расширенная модель ошибок](https://grpc.io/docs/guides/error/):
+код gRPC в trailers и `google.rpc.Status` в `grpc-status-details-bin`.
+Ошибки приложения содержат `google.rpc.ErrorInfo` с `domain: featurify` и стабильным `reason`;
+ошибки валидации дополнительно содержат `google.rpc.BadRequest.field_violations`.
+
+| gRPC code | `ErrorInfo.reason` |
+|---|---|
+| `UNAUTHENTICATED` | `UNAUTHORIZED` |
+| `INVALID_ARGUMENT` | `VALIDATION_ERROR` |
+| `NOT_FOUND` | `NOT_FOUND` |
+| `FAILED_PRECONDITION` | `FEATURE_TYPE_MISMATCH` |
+| `UNAVAILABLE` | `SERVICE_UNAVAILABLE` |
+| `INTERNAL` | `INTERNAL_ERROR` |
+
+Успешные protobuf-ответы остаются `value` и `version`, без обёртки success/error.
+В Java/Kotlin детали извлекаются через `StatusProto.fromThrowable(exception)` и распаковку
+`ErrorInfo` / `BadRequest`. Транспортные ошибки (`DEADLINE_EXCEEDED`, `CANCELLED`,
+`RESOURCE_EXHAUSTED` и другие) могут не содержать расширенных деталей — клиент должен
+уметь обрабатывать один стандартный status code. Наличие `UNAVAILABLE` не предписывает
+безусловные повторы: deadline и политику повторов определяет клиент.
+
+Клиентский стартер запланирован на следующую итерацию и пока не реализован. Для него
+зафиксированы metadata `authorization: Bearer <token>`, текущий `.proto` и этот контракт
+ошибок; namespace в запросы gRPC передавать не требуется.
 
 Сборка генерирует Java gRPC/Protobuf классы из `.proto`. Build-стадия Docker использует
 JDK на Ubuntu для совместимости с бинарниками protoc; runtime остаётся на Alpine.

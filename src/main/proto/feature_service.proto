@@ -4,6 +4,9 @@ option java_package = "ru.a1pha1337.featurify.grpc.proto";
 option java_multiple_files = true;
 
 // Every call requires authorization: Bearer <namespace access token> metadata.
+// Application errors use standard gRPC codes with google.rpc.Status in trailers.
+// Details include google.rpc.ErrorInfo (domain="featurify") and, for invalid fields,
+// google.rpc.BadRequest. Transport errors may contain only a standard gRPC code.
 service FeatureService {
   rpc GetBooleanFeature(GetFeatureRequest) returns (BooleanFeatureResponse);
   rpc GetEnumFeature(GetFeatureRequest) returns (EnumFeatureResponse);

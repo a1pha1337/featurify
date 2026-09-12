@@ -173,12 +173,17 @@ class FeatureToggleService(
     @Transactional(readOnly = true)
     fun listFeatures(namespaceKey: String?, pageable: Pageable, query: String?): Page<FeatureResponse> {
         val namespace = requireActiveNamespace(namespaceKey)
+        return listFeaturesInNamespace(namespace.id!!, pageable, query)
+    }
+
+    @Transactional(readOnly = true)
+    fun listFeaturesInNamespace(namespaceId: UUID, pageable: Pageable, query: String?): Page<FeatureResponse> {
         val normalizedQuery = normalizeQuery(query)
         val features = if (normalizedQuery == null) {
-            featureRepository.findAllByNamespaceId(namespace.id!!, pageable)
+            featureRepository.findAllByNamespaceId(namespaceId, pageable)
         } else {
             featureRepository.findAllByNamespaceIdAndKeyContaining(
-                namespace.id!!,
+                namespaceId,
                 normalizedQuery,
                 pageable,
             )
@@ -189,20 +194,29 @@ class FeatureToggleService(
     @Transactional(readOnly = true)
     fun getFeature(namespaceKey: String?, key: String, group: String?): FeatureResponse {
         val namespace = requireActiveNamespace(namespaceKey)
-        val feature = requireFeature(namespace.id!!, key, normalizeGroup(group))
+        return getFeatureInNamespace(namespace.id!!, key, group)
+    }
+
+    @Transactional(readOnly = true)
+    fun getFeatureInNamespace(namespaceId: UUID, key: String, group: String?): FeatureResponse {
+        val feature = requireFeature(namespaceId, key, normalizeGroup(group))
         return feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
     }
 
     @Transactional(readOnly = true)
     fun resolve(namespaceKey: String?, keys: List<String>, group: String?): ResolveResponse {
+        return resolveInNamespace(requireActiveNamespace(namespaceKey).id!!, keys, group)
+    }
+
+    @Transactional(readOnly = true)
+    fun resolveInNamespace(namespaceId: UUID, keys: List<String>, group: String?): ResolveResponse {
         if (keys.isEmpty() || keys.any { it.isBlank() }) {
             throw validation("keys", "must contain at least one non-blank key")
         }
-        val namespace = requireActiveNamespace(namespaceKey)
         val groupKey = normalizeGroup(group)
         val resolved = LinkedHashMap<String, FeatureResponse>()
         keys.distinct().forEach { key ->
-            val feature = requireFeature(namespace.id!!, key, groupKey)
+            val feature = requireFeature(namespaceId, key, groupKey)
             resolved[key] = feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
         }
         return ResolveResponse(resolved)
