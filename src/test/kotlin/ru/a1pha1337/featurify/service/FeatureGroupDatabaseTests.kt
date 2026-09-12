@@ -18,7 +18,7 @@ import java.util.UUID
 /** Opt-in PostgreSQL test. Spring rolls back all data created by this test. */
 @DataJdbcTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(FeatureToggleService::class, TimeConfiguration::class)
+@Import(FeatureToggleService::class, AccessTokenService::class, TimeConfiguration::class)
 @EnabledIfEnvironmentVariable(named = "FEATURIFY_DB_TESTS", matches = "true")
 class FeatureGroupDatabaseTests {
     @Autowired
@@ -26,6 +26,9 @@ class FeatureGroupDatabaseTests {
 
     @Autowired
     private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+
+    @Autowired
+    private lateinit var accessTokens: AccessTokenService
 
     @MockitoBean
     private lateinit var actor: ActorProvider
@@ -108,6 +111,25 @@ class FeatureGroupDatabaseTests {
         assertThrows(NotFoundException::class.java) { service.listGroups(namespace.key) }
         assertEquals(1, service.listGroups(other.key).size)
         assertTrue(service.listNamespaces().any { it.key == "default" && it.defaultNamespace })
+    }
+
+    @Test
+    fun `namespace tokens persist hashed allow multiple and cascade on namespace deletion`() {
+        val namespace = service.createNamespace(CreateNamespaceRequest("test-${UUID.randomUUID()}", "Tokens"))
+        val first = accessTokens.create(namespace.key, CreateAccessTokenRequest("one"))
+        val second = accessTokens.create(namespace.key, CreateAccessTokenRequest("two"))
+        assertEquals(2, accessTokens.list(namespace.key).size)
+        assertEquals(namespace.id, accessTokens.authenticate(first.token))
+        assertEquals(namespace.id, accessTokens.authenticate(second.token))
+        val hash = jdbc.queryForObject("SELECT token_hash FROM namespace_access_token WHERE id = ?", String::class.java, first.id)!!
+        assertNotEquals(first.token, hash)
+        assertEquals(60, hash.length)
+        accessTokens.revoke(namespace.key, first.id)
+        assertNull(accessTokens.authenticate(first.token))
+        assertEquals(namespace.id, accessTokens.authenticate(second.token))
+        service.deleteNamespace(namespace.key)
+        assertNull(accessTokens.authenticate(second.token))
+        assertEquals(0L, jdbc.queryForObject("SELECT count(*) FROM namespace_access_token WHERE namespace_id = ?", Long::class.java, namespace.id))
     }
 
     @Test

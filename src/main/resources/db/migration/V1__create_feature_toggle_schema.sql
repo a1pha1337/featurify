@@ -45,6 +45,18 @@ CREATE TRIGGER trg_protect_default_namespace_truncate
     FOR EACH STATEMENT
 EXECUTE FUNCTION protect_default_namespace();
 
+CREATE TABLE namespace_access_token
+(
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    namespace_id UUID         NOT NULL REFERENCES namespace (id) ON DELETE CASCADE,
+    name         VARCHAR(255) NOT NULL,
+    token_hash   VARCHAR(60)  NOT NULL,
+    created_at   TIMESTAMPTZ  NOT NULL,
+    CONSTRAINT ck_access_token_name CHECK (length(trim(name)) > 0),
+    CONSTRAINT ck_access_token_hash CHECK (length(token_hash) = 60)
+);
+CREATE INDEX ix_access_token_namespace ON namespace_access_token (namespace_id, created_at DESC);
+
 CREATE TABLE feature_group
 (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),

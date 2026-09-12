@@ -246,6 +246,14 @@ class FeatureToggleService(
     }
 
     @Transactional
+    fun editFeature(
+        namespaceKey: String?, key: String, group: String?, targetGroup: String?, request: PatchFeatureRequest,
+    ): AdminFeatureResponse {
+        val saved = patchFeature(namespaceKey, key, group, request)
+        return moveFeature(namespaceKey, key, group, MoveFeatureRequest(saved.version, targetGroup))
+    }
+
+    @Transactional
     fun patchFeature(
         namespaceKey: String?,
         key: String,

@@ -23,6 +23,7 @@ import java.time.Instant
 import java.util.UUID
 
 class MainViewTests {
+    private val accessTokens = mock(ru.a1pha1337.featurify.service.AccessTokenService::class.java)
     private val service = mock(FeatureToggleService::class.java)
     private val factory = Validation.buildDefaultValidatorFactory()
     private val ui = UI()
@@ -53,7 +54,7 @@ class MainViewTests {
             val visible = if (global) feature.group == null else group == null || feature.group == group
             PageImpl(if (visible) listOf(feature) else emptyList(), page, if (visible) 1 else 0)
         }.`when`(service).listForAdmin(eq("blue"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean())
-        view = MainView(service, factory.validator)
+        view = MainView(service, factory.validator, accessTokens)
         ui.add(view)
     }
 
@@ -101,40 +102,39 @@ class MainViewTests {
     fun `move uses selected feature source and version and follows target filter`() {
         choose(combo(view, "Group"), "Source (source)")
         grid().select(feature)
-        assertTrue(button(view, "Move to group").isEnabled)
-        `when`(service.moveFeature("blue", feature.key, "source", MoveFeatureRequest(7, "target"))).thenAnswer {
+        assertTrue(button(view, "Edit").isEnabled)
+        `when`(service.editFeature("blue", feature.key, "source", "target", PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))).thenAnswer {
             feature = feature.copy(group = "target", version = 8)
             feature
         }
-        button(view, "Move to group").click()
+        button(view, "Edit").click()
         val dialog = dialog()
-        assertFalse(button(dialog, "Move feature").isEnabled)
-        choose(combo(dialog, "Target group"), "Target (target)")
+        choose(combo(dialog, "Group"), "Target (target)")
 
-        button(dialog, "Move feature").click()
+        button(dialog, "Save").click()
 
-        verify(service).moveFeature("blue", feature.key, "source", MoveFeatureRequest(7, "target"))
+        verify(service).editFeature("blue", feature.key, "source", "target", PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))
         assertFalse(dialog.isOpened)
         assertEquals("Target (target)", selectedLabel(combo(view, "Group")))
-        assertFalse(button(view, "Move to group").isEnabled)
+        assertFalse(button(view, "Edit").isEnabled)
     }
 
     @Test
     fun `move to Global is explicit`() {
         grid().select(feature)
-        `when`(service.moveFeature("blue", feature.key, "source", MoveFeatureRequest(7, null))).thenAnswer {
+        `when`(service.editFeature("blue", feature.key, "source", null, PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))).thenAnswer {
             feature = feature.copy(group = null, version = 8)
             feature
         }
-        button(view, "Move to group").click()
+        button(view, "Edit").click()
         val dialog = dialog()
-        val picker = combo(dialog, "Target group")
+        val picker = combo(dialog, "Group")
         assertEquals(3, picker.listDataView.itemCount)
         choose(picker, "Global")
 
-        button(dialog, "Move feature").click()
+        button(dialog, "Save").click()
 
-        verify(service).moveFeature("blue", feature.key, "source", MoveFeatureRequest(7, null))
+        verify(service).editFeature("blue", feature.key, "source", null, PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true))
         assertEquals("All groups", selectedLabel(combo(view, "Group")))
     }
 
@@ -150,7 +150,7 @@ class MainViewTests {
         namespaces.value = other
 
         assertTrue(button(view, "New group").isEnabled)
-        assertFalse(button(view, "Move to group").isEnabled)
+        assertFalse(button(view, "Edit").isEnabled)
         assertEquals("All groups", selectedLabel(combo(view, "Group")))
         assertEquals(2, combo(view, "Group").listDataView.itemCount)
     }
@@ -158,16 +158,16 @@ class MainViewTests {
     @Test
     fun `failed move keeps dialog open for correction`() {
         grid().select(feature)
-        `when`(service.moveFeature("blue", feature.key, "source", MoveFeatureRequest(7, "target")))
+        `when`(service.editFeature("blue", feature.key, "source", "target", PatchFeatureRequest(7, description = "Checkout flag", booleanValue = true)))
             .thenThrow(ru.a1pha1337.featurify.service.ConflictException("Target already contains this key"))
-        button(view, "Move to group").click()
+        button(view, "Edit").click()
         val dialog = dialog()
-        choose(combo(dialog, "Target group"), "Target (target)")
+        choose(combo(dialog, "Group"), "Target (target)")
 
-        button(dialog, "Move feature").click()
+        button(dialog, "Save").click()
 
         assertTrue(dialog.isOpened)
-        assertEquals("Target (target)", selectedLabel(combo(dialog, "Target group")))
+        assertEquals("Target (target)", selectedLabel(combo(dialog, "Group")))
     }
 
     @Test
@@ -208,6 +208,113 @@ class MainViewTests {
         assertFalse(confirmation.isOpened)
         assertEquals(namespace, namespaces.value)
         assertFalse(button(view, "Delete namespace").isEnabled)
+    }
+
+    @Test
+    fun `toolbar has no move action and edit contains group picker`() {
+        assertFalse(components(view).filterIsInstance<Button>().any { it.text == "Move to group" })
+        grid().select(feature)
+        button(view, "Edit").click()
+        assertEquals("Source (source)", selectedLabel(combo(dialog(), "Group")))
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun valueEditor(): Component =
+        (grid().getColumnByKey("value").renderer as com.vaadin.flow.data.renderer.ComponentRenderer<Component, AdminFeatureResponse>)
+            .createComponent(feature)
+
+    @Test
+    fun `inline switch saves value and uses new version for subsequent changes`() {
+        val toggle = valueEditor() as Button
+        assertEquals("true", toggle.element.getAttribute("aria-checked"))
+        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, booleanValue = false)))
+            .thenReturn(feature.copy(value = false, version = 8))
+        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, booleanValue = true)))
+            .thenReturn(feature.copy(value = true, version = 9))
+        toggle.click()
+        assertEquals("false", toggle.element.getAttribute("aria-checked"))
+        toggle.click()
+        verify(service).patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, booleanValue = true))
+        assertEquals("true", toggle.element.getAttribute("aria-checked"))
+    }
+
+    @Test
+    fun `failed inline switch leaves persisted value displayed`() {
+        val toggle = valueEditor() as Button
+        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, booleanValue = false)))
+            .thenThrow(ru.a1pha1337.featurify.service.ConflictException("Stale version"))
+        toggle.click()
+        assertEquals("true", toggle.element.getAttribute("aria-checked"))
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun `inline enum saves client changes and rolls back failed selection`() {
+        feature = feature.copy(type = FeatureType.ENUM, value = "a", enumOptions = listOf("a", "b"))
+        val picker = valueEditor() as ComboBox<String>
+        assertEquals(listOf("a", "b"), picker.listDataView.items.toList())
+        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(7, enumValue = "b")))
+            .thenReturn(feature.copy(value = "b", version = 8))
+        picker.value = "b"
+        com.vaadin.flow.component.ComponentUtil.fireEvent(picker,
+            com.vaadin.flow.component.AbstractField.ComponentValueChangeEvent(picker, picker, "a", true))
+        assertEquals("b", picker.value)
+        `when`(service.patchFeature("blue", feature.key, "source", PatchFeatureRequest(8, enumValue = "a")))
+            .thenThrow(ru.a1pha1337.featurify.service.ConflictException("Stale version"))
+        picker.value = "a"
+        com.vaadin.flow.component.ComponentUtil.fireEvent(picker,
+            com.vaadin.flow.component.AbstractField.ComponentValueChangeEvent(picker, picker, "b", true))
+        assertEquals("b", picker.value)
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun `enum tags add trim deduplicate remove and preserve current value`() {
+        button(view, "New feature").click()
+        val dialog = dialog()
+        combo(dialog, "Type").value = FeatureType.ENUM
+        field(dialog, "Key").value = "language"
+        val tags = components(dialog).filterIsInstance<com.vaadin.flow.component.combobox.MultiSelectComboBox<*>>().single()
+            as com.vaadin.flow.component.combobox.MultiSelectComboBox<String>
+        fun add(text: String) = com.vaadin.flow.component.ComponentUtil.fireEvent(tags,
+            com.vaadin.flow.component.combobox.ComboBoxBase.CustomValueSetEvent(tags, true, text))
+        add("  English  ")
+        add("French")
+        combo(dialog, "Current enum value").value = "French"
+        add("Italian")
+        add("French")
+        assertEquals("French", combo(dialog, "Current enum value").value)
+        assertEquals(3, tags.value.size)
+        tags.value = linkedSetOf("English", "Italian")
+        assertEquals("English", combo(dialog, "Current enum value").value)
+        add(" ")
+        assertTrue(tags.isInvalid)
+        add("Italian")
+        button(dialog, "Create").click()
+        verify(service).createFeature("blue", CreateFeatureRequest(
+            key = "language", type = FeatureType.ENUM, enumValue = "English", enumOptions = listOf("English", "Italian"),
+        ))
+    }
+
+    @Test
+    fun `access token is generated for selected namespace and cleared on dialog close`() {
+        `when`(accessTokens.list("blue")).thenReturn(emptyList())
+        button(view, "Access tokens").click()
+        val dialog = dialog()
+        button(dialog, "Generate token").click()
+        assertTrue(field(dialog, "Token name").isInvalid)
+        val id = UUID.randomUUID()
+        `when`(accessTokens.create("blue", CreateAccessTokenRequest("backend")))
+            .thenReturn(CreatedAccessTokenResponse(id, "backend", now, "test-only-secret"))
+        field(dialog, "Token name").value = "backend"
+        button(dialog, "Generate token").click()
+        verify(accessTokens).create("blue", CreateAccessTokenRequest("backend"))
+        val secret = components(dialog).filterIsInstance<com.vaadin.flow.component.textfield.TextArea>().single()
+        assertTrue(secret.isVisible)
+        assertTrue(secret.isReadOnly)
+        assertEquals("test-only-secret", secret.value)
+        button(dialog, "Close").click()
+        assertEquals("", secret.value)
     }
 
     private fun components(root: Component): List<Component> =

@@ -1,9 +1,12 @@
+import com.google.protobuf.gradle.*
+
 plugins {
 	kotlin("jvm") version "2.3.21"
 	kotlin("plugin.spring") version "2.3.21"
 	id("org.springframework.boot") version "4.1.1"
 	id("io.spring.dependency-management") version "1.1.7"
 	id("com.vaadin") version "25.2.6"
+	id("com.google.protobuf") version "0.10.0"
 }
 
 group = "ru.a1pha1337"
@@ -21,7 +24,16 @@ repositories {
 
 extra["vaadinVersion"] = "25.2.6"
 
+val grpcVersion = "1.82.3"
+val protobufVersion = "4.34.0"
+
 dependencies {
+    implementation(platform("io.grpc:grpc-bom:$grpcVersion"))
+    implementation("io.grpc:grpc-netty-shaded")
+    implementation("io.grpc:grpc-protobuf")
+    implementation("io.grpc:grpc-stub")
+    implementation("com.google.protobuf:protobuf-java:$protobufVersion")
+    testImplementation("io.grpc:grpc-inprocess")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 	implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
 	implementation("org.springframework.boot:spring-boot-starter-security-oauth2-client")
@@ -56,4 +68,10 @@ kotlin {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+}
+
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:$protobufVersion" }
+    plugins { id("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion" } }
+    generateProtoTasks { all().configureEach { plugins { maybeCreate("grpc") } } }
 }

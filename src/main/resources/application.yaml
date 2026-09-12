@@ -47,3 +47,11 @@ management:
         include: health,info
 vaadin:
   launch-browser: false
+
+grpc:
+  server:
+    enabled: ${GRPC_ENABLED:true}
+    port: ${GRPC_PORT:9090}
+    address: ${GRPC_ADDRESS:0.0.0.0}
+    certificate: ${GRPC_TLS_CERTIFICATE:}
+    private-key: ${GRPC_TLS_PRIVATE_KEY:}

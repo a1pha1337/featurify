@@ -1,0 +1,23 @@
+syntax = "proto3";
+package featurify.v1;
+option java_package = "ru.a1pha1337.featurify.grpc.proto";
+option java_multiple_files = true;
+
+// Every call requires authorization: Bearer <namespace access token> metadata.
+service FeatureService {
+  rpc GetBooleanFeature(GetFeatureRequest) returns (BooleanFeatureResponse);
+  rpc GetEnumFeature(GetFeatureRequest) returns (EnumFeatureResponse);
+}
+message GetFeatureRequest {
+  // Group key, not display name. Empty means Global.
+  string group = 1;
+  string key = 2;
+}
+message BooleanFeatureResponse {
+  bool value = 1;
+  int64 version = 2;
+}
+message EnumFeatureResponse {
+  string value = 1;
+  int64 version = 2;
+}

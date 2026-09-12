@@ -5,6 +5,7 @@ import com.vaadin.flow.component.HasValidation
 import com.vaadin.flow.component.button.Button
 import com.vaadin.flow.component.button.ButtonVariant
 import com.vaadin.flow.component.checkbox.Checkbox
+import com.vaadin.flow.component.combobox.MultiSelectComboBox
 import com.vaadin.flow.component.combobox.ComboBox
 import com.vaadin.flow.component.dialog.Dialog
 import com.vaadin.flow.component.grid.Grid
@@ -32,12 +33,14 @@ import ru.a1pha1337.featurify.service.DomainValidationException
 import ru.a1pha1337.featurify.service.NotFoundException
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
+import ru.a1pha1337.featurify.dto.AccessTokenResponse
+import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
+import ru.a1pha1337.featurify.service.AccessTokenService
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.dto.FeatureGroupResponse
-import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.NamespaceResponse
 import ru.a1pha1337.featurify.domain.FeatureType
@@ -48,14 +51,18 @@ import java.time.format.DateTimeFormatter
 @Route("")
 @PageTitle("Featurify")
 @PermitAll
-class MainView(private val service: FeatureToggleService, private val validator: Validator) : VerticalLayout() {
+class MainView(
+    private val service: FeatureToggleService,
+    private val validator: Validator,
+    private val accessTokens: AccessTokenService,
+) : VerticalLayout() {
     private val namespaceSelect = ComboBox<NamespaceResponse>("Namespace")
     private val grid = Grid<AdminFeatureResponse>()
     private val createFeatureButton = Button("New feature")
     private val createGroupButton = Button("New group")
     private val editButton = Button("Edit")
-    private val moveButton = Button("Move to group")
     private val deleteButton = Button("Delete")
+    private val tokensButton = Button("Access tokens")
     private val deleteNamespaceButton = Button("Delete namespace")
     private val groupsButton = Button("Manage groups")
     private val historyButton = Button("History")
@@ -97,7 +104,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
                 refreshFeatures()
             }
         }
-        val header = Div(brand, Div(namespaceSelect, Button("New namespace") { openNamespaceDialog() }, deleteNamespaceButton)
+        val header = Div(brand, Div(namespaceSelect, Button("New namespace") { openNamespaceDialog() }, tokensButton, deleteNamespaceButton)
             .apply { addClassName("namespace-controls") }).apply { addClassName("app-header") }
 
         keyFilter.placeholder = "Search by key…"
@@ -110,6 +117,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         groupSelect.setItemLabelGenerator { it.label }
         groupSelect.addValueChangeListener { filtersChanged() }
 
+        tokensButton.addClickListener { runUiAction { openAccessTokensDialog() } }
         deleteNamespaceButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
         deleteNamespaceButton.addClickListener { openDeleteNamespaceDialog() }
         createFeatureButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY)
@@ -117,7 +125,6 @@ class MainView(private val service: FeatureToggleService, private val validator:
         createGroupButton.addClickListener { openCreateGroupDialog() }
         groupsButton.addClickListener { runUiAction { openGroupsDialog() } }
         editButton.addClickListener { selected()?.let(::openEditDialog) }
-        moveButton.addClickListener { selected()?.let { runUiAction { openMoveDialog(it) } } }
         deleteButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
         deleteButton.addClickListener { selected()?.let(::openDeleteDialog) }
         historyButton.addClickListener { selected()?.let { runUiAction { openHistoryDialog(it) } } }
@@ -131,12 +138,8 @@ class MainView(private val service: FeatureToggleService, private val validator:
         grid.addColumn { it.group ?: "Global" }.setHeader("Group").setWidth("170px").setFlexGrow(1)
         grid.addColumn { if (it.type == FeatureType.BOOLEAN) "Boolean" else "Enum" }
             .setHeader("Type").setWidth("110px").setFlexGrow(0)
-        grid.addComponentColumn { feature ->
-            val label = if (feature.type == FeatureType.BOOLEAN) {
-                if (feature.value == true) "Enabled" else "Disabled"
-            } else feature.value.toString()
-            Span(label).apply { addClassName("value-chip"); element.setAttribute("title", label) }
-        }.setHeader("Value").setWidth("150px").setFlexGrow(1)
+        grid.addComponentColumn { feature -> valueEditor(feature) }
+            .setHeader("Value").setWidth("210px").setFlexGrow(1).setKey("value")
         grid.setSizeFull()
         grid.addClassName("feature-grid")
         grid.asSingleSelect().addValueChangeListener { updateSelection(it.value) }
@@ -155,7 +158,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         val toolbar = Div(title, actions).apply { addClassName("page-toolbar") }
         val filters = Div(keyFilter, groupSelect, Button("Reset filters") { resetFilters() })
             .apply { addClassName("filters") }
-        val selection = Div(selectionSummary, Div(editButton, moveButton, historyButton, deleteButton)
+        val selection = Div(selectionSummary, Div(editButton, historyButton, deleteButton)
             .apply { addClassName("selection-actions") }).apply { addClassName("selection-bar") }
         val table = VerticalLayout(selection, grid, emptyState, pagination).apply {
             addClassName("table-panel")
@@ -173,6 +176,55 @@ class MainView(private val service: FeatureToggleService, private val validator:
         add(header, workspace)
         expand(workspace)
         refreshNamespaces()
+    }
+
+    private fun valueEditor(feature: AdminFeatureResponse): Component {
+        val namespaceKey = namespaceSelect.value?.key ?: return Span()
+        var current = feature
+        if (feature.type == FeatureType.BOOLEAN) {
+            val toggle = Button().apply {
+                addClassName("feature-switch")
+                icon = Span(Span().apply { addClassName("switch-thumb") }).apply { addClassName("switch-track") }
+                element.setAttribute("role", "switch")
+                element.setAttribute("aria-label", "Toggle ${featureName(feature)}")
+            }
+            fun render() {
+                toggle.text = if (current.value == true) "Enabled" else "Disabled"
+                toggle.element.setAttribute("aria-checked", (current.value == true).toString())
+            }
+            render()
+            toggle.addClickListener {
+                runUiAction {
+                    current = service.patchFeature(namespaceKey, current.key, current.group,
+                        PatchFeatureRequest(current.version, booleanValue = current.value != true))
+                    render()
+                    refreshFeatures()
+                }
+            }
+            return toggle
+        }
+        return ComboBox<String>().apply {
+            addClassName("inline-enum")
+            setAriaLabel("Value for ${featureName(feature)}")
+            setItems(feature.enumOptions ?: emptyList())
+            value = feature.value as String
+            isAllowCustomValue = false
+            isClearButtonVisible = false
+            addValueChangeListener { event ->
+                if (event.isFromClient && event.value == null) value = current.value as String
+                if (event.isFromClient && event.value != null && event.value != current.value) {
+                    runUiAction {
+                        try {
+                            current = service.patchFeature(namespaceKey, current.key, current.group,
+                                PatchFeatureRequest(current.version, enumValue = event.value))
+                        } finally {
+                            value = current.value as String
+                        }
+                        refreshFeatures()
+                    }
+                }
+            }
+        }
     }
 
     private fun filtersChanged() {
@@ -196,7 +248,6 @@ class MainView(private val service: FeatureToggleService, private val validator:
     private fun updateSelection(feature: AdminFeatureResponse?) {
         val selected = feature != null
         editButton.isEnabled = selected
-        moveButton.isEnabled = selected
         deleteButton.isEnabled = selected
         historyButton.isEnabled = feature != null
         selectionSummary.text = feature?.let { "Selected: ${featureName(it)}" } ?: "Select a feature to manage it"
@@ -243,6 +294,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         grid.deselectAll()
         updateSelection(null)
         val namespace = namespaceSelect.value
+        tokensButton.isEnabled = namespace != null
         deleteNamespaceButton.isEnabled = namespace != null && !namespace.defaultNamespace && namespace.key != "default"
         listOf(createFeatureButton, createGroupButton, groupsButton).forEach { it.isEnabled = namespace != null }
         groupSelect.isEnabled = namespace != null
@@ -316,6 +368,59 @@ class MainView(private val service: FeatureToggleService, private val validator:
         pagination.add(next, summary)
     }
 
+    private fun openAccessTokensDialog() {
+        val namespace = namespaceSelect.value ?: return
+        val dialog = newDialog("Access tokens: ${namespace.key}")
+        dialog.width = "720px"
+        val name = TextField("Token name").apply { isRequired = true; maxLength = 255 }
+        val generated = TextArea("New token - copy and save it now").apply {
+            isReadOnly = true
+            isVisible = false
+            helperText = "This secret is shown only here. After closing, generate a new token if you lose it."
+            width = "100%"
+        }
+        val tokenGrid = Grid<AccessTokenResponse>().apply {
+            addColumn { it.name }.setHeader("Name").setFlexGrow(1)
+            addColumn { HISTORY_DATE_FORMATTER.format(it.createdAt) }.setHeader("Created").setAutoWidth(true)
+            height = "240px"
+        }
+        fun refresh() { tokenGrid.setItems(accessTokens.list(namespace.key)) }
+        tokenGrid.addComponentColumn { token ->
+            Button("Revoke") {
+                val confirm = newDialog("Revoke ${token.name}?")
+                confirm.add(Paragraph("Backends using this token will lose access immediately."))
+                confirm.footer.add(Button("Cancel") { confirm.close() }, Button("Revoke token") {
+                    runUiAction {
+                        accessTokens.revoke(namespace.key, token.id)
+                        generated.clear()
+                        generated.isVisible = false
+                        refresh()
+                        confirm.close()
+                        success("Token revoked")
+                    }
+                }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR) })
+                confirm.open()
+            }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY) }
+        }.setHeader("Action").setWidth("110px").setFlexGrow(0)
+        refresh()
+        val generate = Button("Generate token") {
+            runUiAction {
+                val created = accessTokens.create(namespace.key, validated(
+                    CreateAccessTokenRequest(name.value.trim()), mapOf("name" to name),
+                ))
+                generated.value = created.token
+                generated.isVisible = true
+                name.clear()
+                refresh()
+            }
+        }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) }
+        dialog.add(form(Paragraph("Each token grants read access to features in this namespace through gRPC."),
+            tokenGrid, name, generate, generated))
+        dialog.footer.add(Button("Close") { dialog.close() })
+        dialog.addOpenedChangeListener { if (!it.isOpened) generated.clear() }
+        dialog.open()
+    }
+
     private fun openDeleteNamespaceDialog() {
         val namespace = namespaceSelect.value ?: return
         if (namespace.defaultNamespace || namespace.key == "default") return
@@ -371,8 +476,35 @@ class MainView(private val service: FeatureToggleService, private val validator:
         }
         val description = TextArea("Description").apply { maxLength = 2000 }
         val booleanValue = Checkbox("Enabled")
-        val enumValue = TextField("Current enum value")
-        val enumOptions = TextField("Allowed values (comma-separated)")
+        val enumValue = ComboBox<String>("Current enum value").apply { isRequired = true }
+        val enumOptions = MultiSelectComboBox<String>("Allowed values").apply {
+            isAllowCustomValue = true
+            isRequired = true
+            isClearButtonVisible = true
+            helperText = "Type a value and press Enter. Remove values with the cross."
+            setItems(emptyList<String>())
+        }
+        val availableOptions = linkedSetOf<String>()
+        enumOptions.addCustomValueSetListener { event ->
+            val option = event.detail.trim()
+            enumOptions.isInvalid = option.isEmpty() || option.length > 255 ||
+                (option !in enumOptions.value && enumOptions.value.size >= 100)
+            enumOptions.errorMessage = "Use 1-255 characters per value and at most 100 values"
+            if (!enumOptions.isInvalid) {
+                val current = enumValue.value
+                val selected = LinkedHashSet(enumOptions.value).apply { add(option) }
+                availableOptions.add(option)
+                enumOptions.setItems(availableOptions)
+                enumOptions.value = selected
+                if (current in selected) enumValue.value = current
+            }
+        }
+        enumOptions.addValueChangeListener {
+            val current = enumValue.value
+            val options = availableOptions.filter { it in enumOptions.value }
+            enumValue.setItems(options)
+            enumValue.value = current?.takeIf { it in options } ?: options.firstOrNull()
+        }
         fun updateFields() {
             val isEnum = type.value == FeatureType.ENUM
             booleanValue.isVisible = !isEnum
@@ -381,12 +513,17 @@ class MainView(private val service: FeatureToggleService, private val validator:
         }
         type.addValueChangeListener { updateFields() }
         updateFields()
-        dialog.add(form(key, group, type, description, booleanValue, enumValue, enumOptions))
+        dialog.add(form(key, group, type, description, booleanValue, enumOptions, enumValue))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Create") {
             runUiAction {
                 val selectedType = type.value
-                val options = enumOptions.value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                val options = availableOptions.filter { it in enumOptions.value }
+                if (selectedType == FeatureType.ENUM && options.isEmpty()) {
+                    enumOptions.isInvalid = true
+                    enumOptions.errorMessage = "Add at least one allowed value"
+                    return@runUiAction
+                }
                 service.createFeature(
                     namespace.key,
                     validated(CreateFeatureRequest(
@@ -470,36 +607,6 @@ class MainView(private val service: FeatureToggleService, private val validator:
         helperText = "Global stores features outside a group"
     }
 
-    private fun openMoveDialog(feature: AdminFeatureResponse) {
-        val namespace = namespaceSelect.value ?: return
-        refreshGroups()
-        val dialog = newDialog("Move feature")
-        val target = groupPicker("Target group").apply {
-            value = groupChoices().firstOrNull { it.key == feature.group }
-        }
-        val confirm = Button("Move feature") {
-            runUiAction {
-                val destination = target.value ?: return@runUiAction
-                val moved = service.moveFeature(namespace.key, feature.key, feature.group,
-                    MoveFeatureRequest(feature.version, destination.key))
-                currentPage = 0
-                if (groupSelect.value?.all == false) selectGroup(moved.group)
-                refreshFeatures()
-                dialog.close()
-                success("'${feature.key}' moved to ${destination.label}")
-            }
-        }.apply {
-            addThemeVariants(ButtonVariant.LUMO_PRIMARY)
-            isEnabled = false
-        }
-        target.addValueChangeListener { confirm.isEnabled = it.value != null && it.value.key != feature.group }
-        dialog.add(form(Span(feature.key).apply { addClassName("feature-key") },
-            Paragraph("Current group: ${feature.group ?: "Global"}"), target))
-        dialog.footer.add(Button("Cancel") { dialog.close() }, confirm)
-        dialog.open()
-        target.focus()
-    }
-
     private fun openDeleteGroupDialog(group: FeatureGroupResponse) {
         val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("Delete group ${group.key}?")
@@ -519,7 +626,11 @@ class MainView(private val service: FeatureToggleService, private val validator:
 
     private fun openEditDialog(feature: AdminFeatureResponse) {
         val namespace = namespaceSelect.value ?: return
+        refreshGroups()
         val dialog = newDialog("Edit ${featureName(feature)}")
+        val group = groupPicker("Group").apply {
+            value = groupChoices().firstOrNull { it.key == feature.group }
+        }
         val description = TextArea("Description").apply { value = feature.description; maxLength = 2000 }
         val booleanValue = Checkbox("Enabled").apply {
             value = feature.value as? Boolean ?: false
@@ -530,14 +641,16 @@ class MainView(private val service: FeatureToggleService, private val validator:
             value = feature.value as? String
             isVisible = feature.type == FeatureType.ENUM
         }
-        dialog.add(form(description, booleanValue, enumValue))
+        dialog.add(form(group, description, booleanValue, enumValue))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Save") {
             runUiAction {
-                service.patchFeature(
+                val destination = group.value ?: return@runUiAction
+                val saved = service.editFeature(
                     namespace.key,
                     feature.key,
                     feature.group,
+                    destination.key,
                     PatchFeatureRequest(
                         version = feature.version,
                         description = description.value,
@@ -546,6 +659,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
                     ),
                 )
                 dialog.close()
+                if (groupSelect.value?.all == false) selectGroup(saved.group)
                 refreshFeatures()
                 success("Changes saved")
             }

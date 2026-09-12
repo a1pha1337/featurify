@@ -26,7 +26,7 @@ body { margin: 0; background: #f3f5fa; }
     display: grid; place-items: center; width: 36px; height: 36px;
     color: white; background: #2855d9; border-radius: 10px; font-size: 1.3rem; font-weight: 750;
 }
-.namespace-controls { display: flex; align-items: baseline; gap: 16px; }
+.namespace-controls { display: flex; align-items: baseline; flex-wrap: wrap; gap: 16px; }
 .namespace-controls vaadin-combo-box { width: 260px; padding-top: 0; }
 .workspace { box-sizing: border-box; padding: 28px 32px 24px; gap: 20px; min-height: 0; }
 .page-toolbar { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -86,3 +86,12 @@ body { margin: 0; background: #f3f5fa; }
     .pagination { padding: 12px; }
     .pagination p { width: 100%; margin-left: 0; }
 }
+
+.feature-switch { background: transparent; color: #5b687d; padding: 0; gap: 10px; font-size: .875rem; }
+.switch-track { display: inline-block; position: relative; width: 38px; height: 22px; border-radius: 20px; background: #8390a5; flex-shrink: 0; }
+.switch-thumb { position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: white; transition: transform .15s; }
+.feature-switch[aria-checked="true"] { color: #14744d; }
+.feature-switch[aria-checked="true"] .switch-track { background: #168557; }
+.feature-switch[aria-checked="true"] .switch-thumb { transform: translateX(16px); }
+.feature-switch:focus-visible { outline: 2px solid #2855d9; outline-offset: 4px; }
+.inline-enum { width: 100%; min-width: 140px; padding: 0; }
