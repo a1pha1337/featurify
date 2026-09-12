@@ -24,15 +24,15 @@ repositories {
 
 extra["vaadinVersion"] = "25.2.6"
 
-val grpcVersion = "1.82.3"
-val protobufVersion = "4.34.0"
-
 dependencies {
-    implementation(platform("io.grpc:grpc-bom:$grpcVersion"))
+    implementation("org.springframework.boot:spring-boot-starter-grpc-server") {
+        exclude(group = "io.grpc", module = "grpc-netty")
+    }
     implementation("io.grpc:grpc-netty-shaded")
     implementation("io.grpc:grpc-protobuf")
     implementation("io.grpc:grpc-stub")
-    implementation("com.google.protobuf:protobuf-java:$protobufVersion")
+    implementation("com.google.protobuf:protobuf-java")
+    testImplementation("org.springframework.boot:spring-boot-starter-grpc-server-test")
     testImplementation("io.grpc:grpc-inprocess")
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 	implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
@@ -71,7 +71,5 @@ tasks.withType<Test> {
 }
 
 protobuf {
-    protoc { artifact = "com.google.protobuf:protoc:$protobufVersion" }
-    plugins { id("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion" } }
-    generateProtoTasks { all().configureEach { plugins { maybeCreate("grpc") } } }
+    plugins { id("grpc") {} }
 }

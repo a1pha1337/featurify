@@ -1,0 +1,13 @@
+spring:
+  ssl:
+    bundle:
+      pem:
+        grpc-server:
+          keystore:
+            certificate: ${GRPC_TLS_CERTIFICATE}
+            private-key: ${GRPC_TLS_PRIVATE_KEY}
+  grpc:
+    server:
+      ssl:
+        enabled: true
+        bundle: grpc-server

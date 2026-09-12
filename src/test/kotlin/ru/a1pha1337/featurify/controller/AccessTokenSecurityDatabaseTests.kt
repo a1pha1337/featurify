@@ -15,7 +15,7 @@ import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.service.FeatureToggleService
 import java.util.UUID
 
-@SpringBootTest(properties = ["grpc.server.enabled=false", "vaadin.productionMode=true"])
+@SpringBootTest(properties = ["spring.grpc.server.enabled=false", "vaadin.productionMode=true"])
 @AutoConfigureMockMvc
 @Transactional
 @EnabledIfEnvironmentVariable(named = "FEATURIFY_DB_TESTS", matches = "true")

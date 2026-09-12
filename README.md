@@ -205,7 +205,15 @@ UUID используется для поиска записи; проверяе
 Хешируется 43-символьный секрет, что укладывается в ограничение bcrypt в 72 байта.
 Таблица токенов добавлена в V1; для уже применённой V1 потребуется новая БД.
 
-Контракт: `src/main/proto/feature_service.proto`. gRPC слушает порт `9090`:
+Контракт: `src/main/proto/feature_service.proto`. gRPC слушает порт `9090`.
+
+Сервер запускает официальный `org.springframework.boot:spring-boot-starter-grpc-server`.
+Spring регистрирует `FeatureGrpcService` через `@GrpcService` и подключает к нему
+`TokenAuthenticationInterceptor`. Жизненным циклом сервера управляет Spring; время
+graceful shutdown — 5 секунд, максимальный размер входящего сообщения — 16 КБ.
+Версии gRPC, Protobuf и генераторов кода согласованы dependency management Spring Boot.
+Автоматическая OAuth2-авторизация gRPC отключена: Keycloak используется только для HTTP,
+а gRPC продолжает проверять namespace-токены в PostgreSQL.
 
 ```text
 featurify.v1.FeatureService/GetBooleanFeature
@@ -233,9 +241,17 @@ grpcurl -plaintext -import-path src/main/proto -proto feature_service.proto \
 ```
 
 `GRPC_PORT` задаёт порт (в Compose — порт хоста), `GRPC_ADDRESS` — адрес привязки,
-`GRPC_ENABLED=false` отключает сервер. Для TLS задайте вместе `GRPC_TLS_CERTIFICATE`
-и `GRPC_TLS_PRIVATE_KEY`: пути к PEM-сертификату и приватному ключу, доступные процессу.
-В контейнере смонтируйте файлы и передайте эти переменные через Compose override.
+`GRPC_ENABLED=false` отключает сервер. Настройки теперь находятся в `spring.grpc.server.*`;
+старые свойства `grpc.server.*` больше не используются. Переменные `GRPC_PORT`,
+`GRPC_ADDRESS` и `GRPC_ENABLED` сохранены.
+
+TLS настраивается через Spring SSL bundle. Включите профиль `grpc-tls`
+(`SPRING_PROFILES_ACTIVE=grpc-tls`, либо добавьте его к существующим профилям) и задайте
+вместе `GRPC_TLS_CERTIFICATE` и `GRPC_TLS_PRIVATE_KEY`: ресурсы PEM-сертификата и ключа,
+например `file:/certs/server.crt` и `file:/certs/server.key`. После перехода на стартер
+для этих двух переменных требуется профиль `grpc-tls`. Без сертификата или ключа
+TLS-профиль не позволит приложению запуститься.
+В контейнере смонтируйте файлы и передайте профиль и переменные через Compose override.
 Локальная конфигурация использует plaintext; вне доверенной локальной среды используйте
 TLS на gRPC-сервере либо на доверенном прокси, а для выдачи токенов через REST/UI — HTTPS.
 Внешний TLS-прокси должен поддерживать gRPC/HTTP2 и передавать `authorization`.
@@ -258,3 +274,7 @@ JDK на Ubuntu для совместимости с бинарниками prot
 `./gradlew test`. Используйте отдельную тестовую БД через `DB_URL` / `DB_USERNAME` /
 `DB_PASSWORD`: Flyway применяет V1 автоматически, а тестовые данные откатываются.
 Этот режим также проверяет цепочку Spring Security, хранение токенов, отзыв и каскады БД.
+Дополнительно запускается настоящий сервер Spring gRPC на случайном порту: проверяются
+автоматическая регистрация сервиса и авторизации, изоляция namespace, отзыв токенов
+и ограничение размера сообщения. Те же RPC-проверки выполняются через TLS с проверкой
+сертификата и профилем `grpc-tls`. Тестовые namespace удаляются после этих RPC-тестов.

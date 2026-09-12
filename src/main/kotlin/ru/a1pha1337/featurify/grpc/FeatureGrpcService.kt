@@ -3,14 +3,14 @@ package ru.a1pha1337.featurify.grpc
 import io.grpc.Status
 import io.grpc.stub.StreamObserver
 import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Component
+import org.springframework.grpc.server.service.GrpcService
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.grpc.proto.*
 import ru.a1pha1337.featurify.service.BackendFeatureService
 import ru.a1pha1337.featurify.service.DomainValidationException
 import ru.a1pha1337.featurify.service.NotFoundException
 
-@Component
+@GrpcService(interceptors = [TokenAuthenticationInterceptor::class])
 class FeatureGrpcService(private val features: BackendFeatureService) : FeatureServiceGrpc.FeatureServiceImplBase() {
     override fun getBooleanFeature(request: GetFeatureRequest, observer: StreamObserver<BooleanFeatureResponse>) =
         respond(observer) {
