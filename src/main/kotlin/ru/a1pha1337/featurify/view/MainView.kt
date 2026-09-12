@@ -16,6 +16,7 @@ import com.vaadin.flow.component.html.H1
 import com.vaadin.flow.component.html.Paragraph
 import com.vaadin.flow.component.notification.Notification
 import com.vaadin.flow.component.notification.NotificationVariant
+import com.vaadin.flow.component.page.Page
 import com.vaadin.flow.component.orderedlayout.FlexComponent.Alignment
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout
 import com.vaadin.flow.component.orderedlayout.VerticalLayout
@@ -45,6 +46,8 @@ import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.NamespaceResponse
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.service.FeatureToggleService
+import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
@@ -78,13 +81,15 @@ class MainView(
     private val globalGroup = GroupChoice(null, "Global")
     private var currentPage = 0
     private var groups: List<FeatureGroupResponse> = emptyList()
+    private var clientZoneId: ZoneId = ZoneOffset.UTC
+    private var localDateTimeFormatter = DateTimeFormatter
+        .ofPattern("yyyy-MM-dd HH:mm z")
+        .withZone(clientZoneId)
+    private val dateTimeRefreshers = mutableListOf<() -> Unit>()
 
     companion object {
         private const val PAGE_SIZE = 20
         private const val VISIBLE_PAGE_BUTTONS = 7
-        private val HISTORY_DATE_FORMATTER = DateTimeFormatter
-            .ofPattern("yyyy-MM-dd HH:mm 'UTC'")
-            .withZone(ZoneOffset.UTC)
     }
 
     init {
@@ -176,7 +181,26 @@ class MainView(
         add(header, workspace)
         expand(workspace)
         refreshNamespaces()
+        addAttachListener { resolveClientZone(it.ui.page) }
     }
+
+    private fun resolveClientZone(page: Page) {
+        page.retrieveExtendedClientDetails { details ->
+            val zone = details.timeZoneId
+                ?.let { runCatching { ZoneId.of(it) }.getOrNull() }
+                ?: ZoneOffset.UTC
+            if (zone != clientZoneId) {
+                clientZoneId = zone
+                localDateTimeFormatter = DateTimeFormatter
+                    .ofPattern("yyyy-MM-dd HH:mm z")
+                    .withZone(clientZoneId)
+                grid.dataProvider.refreshAll()
+                dateTimeRefreshers.toList().forEach { it() }
+            }
+        }
+    }
+
+    private fun formatDateTime(value: Instant): String = localDateTimeFormatter.format(value)
 
     private fun valueEditor(feature: AdminFeatureResponse): Component {
         val namespaceKey = namespaceSelect.value?.key ?: return Span()
@@ -381,9 +405,12 @@ class MainView(
         }
         val tokenGrid = Grid<AccessTokenResponse>().apply {
             addColumn { it.name }.setHeader("Name").setFlexGrow(1)
-            addColumn { HISTORY_DATE_FORMATTER.format(it.createdAt) }.setHeader("Created").setAutoWidth(true)
+            addColumn { formatDateTime(it.createdAt) }.setHeader("Created").setAutoWidth(true)
             height = "240px"
         }
+        val refreshTokenDates = { tokenGrid.dataProvider.refreshAll() }
+        dateTimeRefreshers += refreshTokenDates
+        dialog.addOpenedChangeListener { if (!it.isOpened) dateTimeRefreshers.remove(refreshTokenDates) }
         fun refresh() { tokenGrid.setItems(accessTokens.list(namespace.key)) }
         tokenGrid.addComponentColumn { token ->
             Button("Revoke") {
@@ -688,11 +715,14 @@ class MainView(
         val dialog = newDialog("History: ${featureName(feature)}")
         dialog.width = "850px"
         val history = Grid(service.history(namespace.key, feature.key, feature.group))
-        history.addColumn { HISTORY_DATE_FORMATTER.format(it.changedAt) }.setHeader("Changed at").setAutoWidth(true)
+        history.addColumn { formatDateTime(it.changedAt) }.setHeader("Changed at").setAutoWidth(true)
         history.addColumn { it.operation }.setHeader("Operation").setAutoWidth(true)
         history.addColumn { it.oldValue }.setHeader("Old value")
         history.addColumn { it.newValue }.setHeader("New value")
         history.addColumn { it.changedBy }.setHeader("User").setAutoWidth(true)
+        val refreshHistoryDates = { history.dataProvider.refreshAll() }
+        dateTimeRefreshers += refreshHistoryDates
+        dialog.addOpenedChangeListener { if (!it.isOpened) dateTimeRefreshers.remove(refreshHistoryDates) }
         dialog.add(history)
         dialog.footer.add(Button("Close") { dialog.close() })
         dialog.open()
