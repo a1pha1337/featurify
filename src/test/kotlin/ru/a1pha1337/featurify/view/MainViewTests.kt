@@ -27,7 +27,7 @@ class MainViewTests {
     private val factory = Validation.buildDefaultValidatorFactory()
     private val ui = UI()
     private val now = Instant.parse("2026-09-11T12:00:00Z")
-    private val tenant = TenantResponse(UUID.randomUUID(), "blue", "Blue", true, now, now, true)
+    private val namespace = NamespaceResponse(UUID.randomUUID(), "blue", "Blue", true, now, now, true)
     private val source = FeatureGroupResponse(UUID.randomUUID(), "source", "Source", 1, now, now)
     private val target = source.copy(id = UUID.randomUUID(), key = "target", displayName = "Target")
     private val groups = mutableListOf(source, target)
@@ -43,7 +43,7 @@ class MainViewTests {
         VaadinSession.setCurrent(session)
         ui.internals.session = session
         UI.setCurrent(ui)
-        `when`(service.listTenants()).thenReturn(listOf(tenant))
+        `when`(service.listNamespaces()).thenReturn(listOf(namespace))
         `when`(service.listGroups("blue")).thenAnswer { groups.toList() }
         // Default answer avoids nullable Mockito matchers crossing Kotlin's non-null parameters.
         doAnswer { invocation ->
@@ -65,12 +65,12 @@ class MainViewTests {
     }
 
     @Test
-    fun `tenant creation offers no default tenant control`() {
-        button(view, "New tenant").click()
+    fun `namespace creation offers no default namespace control`() {
+        button(view, "New namespace").click()
         val dialog = dialog()
 
         assertTrue(components(dialog).filterIsInstance<com.vaadin.flow.component.checkbox.Checkbox>().isEmpty())
-        assertEquals(setOf("Tenant key", "Display name"),
+        assertEquals(setOf("Namespace key", "Display name"),
             components(dialog).filterIsInstance<TextField>().map { it.label }.toSet())
     }
 
@@ -139,15 +139,15 @@ class MainViewTests {
     }
 
     @Test
-    fun `switching tenant clears selection and keeps group creation enabled`() {
-        val other = tenant.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultTenant = false)
+    fun `switching namespace clears selection and keeps group creation enabled`() {
+        val other = namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
         `when`(service.listGroups("other")).thenReturn(emptyList())
         `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
             .thenReturn(PageImpl(emptyList()))
         grid().select(feature)
-        val tenants = combo(view, "Tenant")
-        tenants.setItems(listOf(tenant, other))
-        tenants.value = other
+        val namespaces = combo(view, "Namespace")
+        namespaces.setItems(listOf(namespace, other))
+        namespaces.value = other
 
         assertTrue(button(view, "New group").isEnabled)
         assertFalse(button(view, "Move to group").isEnabled)
@@ -186,28 +186,28 @@ class MainViewTests {
     }
 
     @Test
-    fun `default tenant deletion is disabled`() {
-        assertFalse(button(view, "Delete tenant").isEnabled)
+    fun `default namespace deletion is disabled`() {
+        assertFalse(button(view, "Delete namespace").isEnabled)
     }
 
     @Test
-    fun `tenant deletion confirms cascade and selects default afterwards`() {
-        val other = tenant.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultTenant = false)
+    fun `namespace deletion confirms cascade and selects default afterwards`() {
+        val other = namespace.copy(id = UUID.randomUUID(), key = "other", displayName = "Other", defaultNamespace = false)
         `when`(service.listGroups("other")).thenReturn(emptyList())
         `when`(service.listForAdmin(eq("other"), anyPage(), nullableQuery(), nullableQuery(), anyBoolean()))
             .thenReturn(PageImpl(emptyList()))
-        val tenants = combo(view, "Tenant")
-        tenants.setItems(listOf(tenant, other))
-        tenants.value = other
-        assertTrue(button(view, "Delete tenant").isEnabled)
-        button(view, "Delete tenant").click()
+        val namespaces = combo(view, "Namespace")
+        namespaces.setItems(listOf(namespace, other))
+        namespaces.value = other
+        assertTrue(button(view, "Delete namespace").isEnabled)
+        button(view, "Delete namespace").click()
         val confirmation = dialog()
-        verify(service, never()).deleteTenant("other")
-        button(confirmation, "Delete tenant").click()
-        verify(service).deleteTenant("other")
+        verify(service, never()).deleteNamespace("other")
+        button(confirmation, "Delete namespace").click()
+        verify(service).deleteNamespace("other")
         assertFalse(confirmation.isOpened)
-        assertEquals(tenant, tenants.value)
-        assertFalse(button(view, "Delete tenant").isEnabled)
+        assertEquals(namespace, namespaces.value)
+        assertFalse(button(view, "Delete namespace").isEnabled)
     }
 
     private fun components(root: Component): List<Component> =

@@ -5,14 +5,14 @@ import ru.a1pha1337.featurify.domain.FeatureAuditLog
 import java.util.UUID
 
 interface FeatureAuditLogRepository : CrudRepository<FeatureAuditLog, UUID> {
-    fun findAllByTenantIdAndFeatureGroupAndFeatureKeyOrderByChangedAtDesc(
-        tenantId: UUID,
+    fun findAllByNamespaceIdAndFeatureGroupAndFeatureKeyOrderByChangedAtDesc(
+        namespaceId: UUID,
         featureGroup: String,
         featureKey: String,
     ): List<FeatureAuditLog>
 
-    fun findAllByTenantIdAndFeatureGroupIsNullAndFeatureKeyOrderByChangedAtDesc(
-        tenantId: UUID,
+    fun findAllByNamespaceIdAndFeatureGroupIsNullAndFeatureKeyOrderByChangedAtDesc(
+        namespaceId: UUID,
         featureKey: String,
     ): List<FeatureAuditLog>
 }

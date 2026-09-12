@@ -17,22 +17,22 @@ import ru.a1pha1337.featurify.service.FeatureToggleService
 class PublicFeatureController(private val service: FeatureToggleService) {
     @GetMapping("/features")
     fun list(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @PageableDefault(size = 20, sort = ["key"]) pageable: Pageable,
         @RequestParam(required = false) query: String?,
-    ): Page<FeatureResponse> = service.listFeatures(tenant, pageable, query)
+    ): Page<FeatureResponse> = service.listFeatures(namespace, pageable, query)
 
     @GetMapping("/features/{key}")
     fun get(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
-    ): FeatureResponse = service.getFeature(tenant, key, group)
+    ): FeatureResponse = service.getFeature(namespace, key, group)
 
     @GetMapping("/features:resolve")
     fun resolve(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @RequestParam(required = false) group: String?,
         @RequestParam keys: String,
-    ): ResolveResponse = service.resolve(tenant, keys.split(',').map { it.trim() }, group)
+    ): ResolveResponse = service.resolve(namespace, keys.split(',').map { it.trim() }, group)
 }

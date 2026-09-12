@@ -9,7 +9,7 @@ import java.util.UUID
 @Table("feature")
 data class Feature(
     @Id val id: UUID? = null,
-    val tenantId: UUID,
+    val namespaceId: UUID,
     val key: String,
     val type: FeatureType,
     val groupId: UUID? = null,

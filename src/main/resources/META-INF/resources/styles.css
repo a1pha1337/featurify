@@ -26,8 +26,8 @@ body { margin: 0; background: #f3f5fa; }
     display: grid; place-items: center; width: 36px; height: 36px;
     color: white; background: #2855d9; border-radius: 10px; font-size: 1.3rem; font-weight: 750;
 }
-.tenant-controls { display: flex; align-items: baseline; gap: 16px; }
-.tenant-controls vaadin-combo-box { width: 260px; padding-top: 0; }
+.namespace-controls { display: flex; align-items: baseline; gap: 16px; }
+.namespace-controls vaadin-combo-box { width: 260px; padding-top: 0; }
 .workspace { box-sizing: border-box; padding: 28px 32px 24px; gap: 20px; min-height: 0; }
 .page-toolbar { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-title h2 { margin: 0 0 6px; font-size: 1.85rem; letter-spacing: -.04em; }
@@ -76,8 +76,8 @@ body { margin: 0; background: #f3f5fa; }
 @media (max-width: 600px) {
     .main-view { height: auto !important; }
     .app-header { padding: 16px; }
-    .tenant-controls { width: 100%; gap: 8px; }
-    .tenant-controls vaadin-combo-box { flex: 1; min-width: 0; }
+    .namespace-controls { width: 100%; gap: 8px; }
+    .namespace-controls vaadin-combo-box { flex: 1; min-width: 0; }
     .workspace { padding: 20px 12px; height: auto !important; }
     .filters { padding: 12px; gap: 8px; }
     .filters vaadin-text-field, .filters vaadin-combo-box, .filters vaadin-multi-select-combo-box { flex-basis: 100%; }

@@ -35,11 +35,11 @@ import org.springframework.data.domain.Sort
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
-import ru.a1pha1337.featurify.dto.CreateTenantRequest
+import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.dto.FeatureGroupResponse
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
-import ru.a1pha1337.featurify.dto.TenantResponse
+import ru.a1pha1337.featurify.dto.NamespaceResponse
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.service.FeatureToggleService
 import java.time.ZoneOffset
@@ -49,14 +49,14 @@ import java.time.format.DateTimeFormatter
 @PageTitle("Featurify")
 @PermitAll
 class MainView(private val service: FeatureToggleService, private val validator: Validator) : VerticalLayout() {
-    private val tenantSelect = ComboBox<TenantResponse>("Tenant")
+    private val namespaceSelect = ComboBox<NamespaceResponse>("Namespace")
     private val grid = Grid<AdminFeatureResponse>()
     private val createFeatureButton = Button("New feature")
     private val createGroupButton = Button("New group")
     private val editButton = Button("Edit")
     private val moveButton = Button("Move to group")
     private val deleteButton = Button("Delete")
-    private val deleteTenantButton = Button("Delete tenant")
+    private val deleteNamespaceButton = Button("Delete namespace")
     private val groupsButton = Button("Manage groups")
     private val historyButton = Button("History")
     private val groupSelect = ComboBox<GroupChoice>("Group")
@@ -88,17 +88,17 @@ class MainView(private val service: FeatureToggleService, private val validator:
 
         val brand = Div(Span("F").apply { addClassName("brand-mark") }, H1("Featurify"))
             .apply { addClassName("brand") }
-        tenantSelect.setItemLabelGenerator { if (it.defaultTenant) it.key else it.displayName }
-        tenantSelect.isAllowCustomValue = false
-        tenantSelect.addValueChangeListener {
+        namespaceSelect.setItemLabelGenerator { if (it.defaultNamespace) it.key else it.displayName }
+        namespaceSelect.isAllowCustomValue = false
+        namespaceSelect.addValueChangeListener {
             if (!updatingControls) runUiAction {
                 currentPage = 0
                 refreshGroups(preserveSelection = false)
                 refreshFeatures()
             }
         }
-        val header = Div(brand, Div(tenantSelect, Button("New tenant") { openTenantDialog() }, deleteTenantButton)
-            .apply { addClassName("tenant-controls") }).apply { addClassName("app-header") }
+        val header = Div(brand, Div(namespaceSelect, Button("New namespace") { openNamespaceDialog() }, deleteNamespaceButton)
+            .apply { addClassName("namespace-controls") }).apply { addClassName("app-header") }
 
         keyFilter.placeholder = "Search by key…"
         keyFilter.maxLength = 255
@@ -110,8 +110,8 @@ class MainView(private val service: FeatureToggleService, private val validator:
         groupSelect.setItemLabelGenerator { it.label }
         groupSelect.addValueChangeListener { filtersChanged() }
 
-        deleteTenantButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
-        deleteTenantButton.addClickListener { openDeleteTenantDialog() }
+        deleteNamespaceButton.addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
+        deleteNamespaceButton.addClickListener { openDeleteNamespaceDialog() }
         createFeatureButton.addThemeVariants(ButtonVariant.LUMO_PRIMARY)
         createFeatureButton.addClickListener { runUiAction { openCreateFeatureDialog() } }
         createGroupButton.addClickListener { openCreateGroupDialog() }
@@ -172,7 +172,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         }
         add(header, workspace)
         expand(workspace)
-        refreshTenants()
+        refreshNamespaces()
     }
 
     private fun filtersChanged() {
@@ -202,13 +202,13 @@ class MainView(private val service: FeatureToggleService, private val validator:
         selectionSummary.text = feature?.let { "Selected: ${featureName(it)}" } ?: "Select a feature to manage it"
     }
 
-    private fun refreshTenants(selectTenantKey: String? = tenantSelect.value?.key) {
-        val tenants = service.listTenants()
+    private fun refreshNamespaces(selectNamespaceKey: String? = namespaceSelect.value?.key) {
+        val namespaces = service.listNamespaces()
         updatingControls = true
         try {
-            tenantSelect.setItems(tenants)
-            tenantSelect.value = tenants.firstOrNull { it.key == selectTenantKey }
-                ?: tenants.firstOrNull { it.defaultTenant } ?: tenants.firstOrNull()
+            namespaceSelect.setItems(namespaces)
+            namespaceSelect.value = namespaces.firstOrNull { it.key == selectNamespaceKey }
+                ?: namespaces.firstOrNull { it.defaultNamespace } ?: namespaces.firstOrNull()
         } finally {
             updatingControls = false
         }
@@ -219,7 +219,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
 
     private fun refreshGroups(preserveSelection: Boolean = true) {
         val previous = groupSelect.value.takeIf { preserveSelection }
-        groups = tenantSelect.value?.let { service.listGroups(it.key) } ?: emptyList()
+        groups = namespaceSelect.value?.let { service.listGroups(it.key) } ?: emptyList()
         val choices = listOf(allGroups, globalGroup) + groups.map {
             GroupChoice(it.key, "${it.displayName} (${it.key})")
         }
@@ -242,23 +242,23 @@ class MainView(private val service: FeatureToggleService, private val validator:
     private fun refreshFeatures() {
         grid.deselectAll()
         updateSelection(null)
-        val tenant = tenantSelect.value
-        deleteTenantButton.isEnabled = tenant != null && !tenant.defaultTenant && tenant.key != "default"
-        listOf(createFeatureButton, createGroupButton, groupsButton).forEach { it.isEnabled = tenant != null }
-        groupSelect.isEnabled = tenant != null
+        val namespace = namespaceSelect.value
+        deleteNamespaceButton.isEnabled = namespace != null && !namespace.defaultNamespace && namespace.key != "default"
+        listOf(createFeatureButton, createGroupButton, groupsButton).forEach { it.isEnabled = namespace != null }
+        groupSelect.isEnabled = namespace != null
         val query = keyFilter.value.trim()
         val invalidQuery = query.isNotEmpty() && query.length < 3
         keyFilter.isInvalid = invalidQuery
         keyFilter.errorMessage = "Enter at least 3 characters"
-        if (tenant == null || invalidQuery) {
+        if (namespace == null || invalidQuery) {
             grid.setItems(emptyList())
             renderPagination(0, 0)
-            showEmpty(if (tenant == null) "Create a tenant to get started" else "Keep typing to search",
-                if (tenant == null) "Use New tenant to create your workspace." else "Feature search requires at least 3 characters.")
+            showEmpty(if (namespace == null) "Create a namespace to get started" else "Keep typing to search",
+                if (namespace == null) "Use New namespace to create your workspace." else "Feature search requires at least 3 characters.")
             return
         }
         val scope = groupSelect.value ?: allGroups
-        fun load() = service.listForAdmin(tenant.key, pageRequest(), query, scope.key, !scope.all && scope.key == null)
+        fun load() = service.listForAdmin(namespace.key, pageRequest(), query, scope.key, !scope.all && scope.key == null)
         var result = load()
         if (result.totalPages > 0 && currentPage >= result.totalPages) {
             currentPage = result.totalPages - 1
@@ -316,49 +316,49 @@ class MainView(private val service: FeatureToggleService, private val validator:
         pagination.add(next, summary)
     }
 
-    private fun openDeleteTenantDialog() {
-        val tenant = tenantSelect.value ?: return
-        if (tenant.defaultTenant || tenant.key == "default") return
-        val dialog = newDialog("Delete tenant ${tenant.key}?")
-        dialog.add(Paragraph("This tenant, all its groups, features and history will be permanently deleted. This cannot be undone."))
+    private fun openDeleteNamespaceDialog() {
+        val namespace = namespaceSelect.value ?: return
+        if (namespace.defaultNamespace || namespace.key == "default") return
+        val dialog = newDialog("Delete namespace ${namespace.key}?")
+        dialog.add(Paragraph("This namespace, all its groups, features and history will be permanently deleted. This cannot be undone."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
-        dialog.footer.add(Button("Delete tenant") {
+        dialog.footer.add(Button("Delete namespace") {
             runUiAction {
-                service.deleteTenant(tenant.key)
+                service.deleteNamespace(namespace.key)
                 dialog.close()
-                refreshTenants()
-                success("Tenant deleted")
+                refreshNamespaces()
+                success("Namespace deleted")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_ERROR) })
         dialog.open()
     }
 
-    private fun openTenantDialog() {
-        val dialog = newDialog("Create tenant")
-        val tenantKey = TextField("Tenant key")
+    private fun openNamespaceDialog() {
+        val dialog = newDialog("Create namespace")
+        val namespaceKey = TextField("Namespace key")
         val displayName = TextField("Display name")
-        tenantKey.isRequired = true
+        namespaceKey.isRequired = true
         displayName.isRequired = true
-        dialog.add(form(tenantKey, displayName))
+        dialog.add(form(namespaceKey, displayName))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Create") {
             runUiAction {
-                service.createTenant(
-                    validated(CreateTenantRequest(
-                        key = tenantKey.value.trim(),
+                service.createNamespace(
+                    validated(CreateNamespaceRequest(
+                        key = namespaceKey.value.trim(),
                         displayName = displayName.value.trim(),
-                    ), mapOf("key" to tenantKey, "displayName" to displayName)),
+                    ), mapOf("key" to namespaceKey, "displayName" to displayName)),
                 )
                 dialog.close()
-                refreshTenants(tenantKey.value.trim())
-                success("Tenant created")
+                refreshNamespaces(namespaceKey.value.trim())
+                success("Namespace created")
             }
         }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) })
         dialog.open()
     }
 
     private fun openCreateFeatureDialog() {
-        val tenant = tenantSelect.value ?: return
+        val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("Create feature")
         refreshGroups()
         val key = TextField("Key").apply { isRequired = true; maxLength = 255; helperText = "Lowercase letters, digits, dots and hyphens" }
@@ -388,7 +388,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
                 val selectedType = type.value
                 val options = enumOptions.value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
                 service.createFeature(
-                    tenant.key,
+                    namespace.key,
                     validated(CreateFeatureRequest(
                         key = key.value.trim(),
                         type = selectedType,
@@ -408,7 +408,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun openCreateGroupDialog() {
-        val tenant = tenantSelect.value ?: return
+        val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("Create group")
         val key = TextField("Group key").apply {
             isRequired = true
@@ -417,11 +417,11 @@ class MainView(private val service: FeatureToggleService, private val validator:
             helperText = "Lowercase letters, digits, dots or hyphens; start and end with a letter or digit"
         }
         val displayName = TextField("Display name").apply { isRequired = true; maxLength = 255; placeholder = "Checkout" }
-        dialog.add(form(Paragraph("New group in ${tenant.displayName}"), key, displayName))
+        dialog.add(form(Paragraph("New group in ${namespace.displayName}"), key, displayName))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Create group") {
             runUiAction {
-                val created = service.createGroup(tenant.key, validated(
+                val created = service.createGroup(namespace.key, validated(
                     CreateFeatureGroupRequest(key.value.trim(), displayName.value.trim()),
                     mapOf("key" to key, "displayName" to displayName),
                 ))
@@ -437,7 +437,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun openGroupsDialog() {
-        if (tenantSelect.value == null) return
+        if (namespaceSelect.value == null) return
         refreshGroups()
         val dialog = newDialog("Manage groups")
         dialog.width = "800px"
@@ -471,7 +471,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun openMoveDialog(feature: AdminFeatureResponse) {
-        val tenant = tenantSelect.value ?: return
+        val namespace = namespaceSelect.value ?: return
         refreshGroups()
         val dialog = newDialog("Move feature")
         val target = groupPicker("Target group").apply {
@@ -480,7 +480,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         val confirm = Button("Move feature") {
             runUiAction {
                 val destination = target.value ?: return@runUiAction
-                val moved = service.moveFeature(tenant.key, feature.key, feature.group,
+                val moved = service.moveFeature(namespace.key, feature.key, feature.group,
                     MoveFeatureRequest(feature.version, destination.key))
                 currentPage = 0
                 if (groupSelect.value?.all == false) selectGroup(moved.group)
@@ -501,13 +501,13 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun openDeleteGroupDialog(group: FeatureGroupResponse) {
-        val tenant = tenantSelect.value ?: return
+        val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("Delete group ${group.key}?")
         dialog.add(Paragraph("This group and all its features will be permanently deleted. This cannot be undone."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Delete group") {
             runUiAction {
-                service.deleteGroup(tenant.key, group.key, group.version)
+                service.deleteGroup(namespace.key, group.key, group.version)
                 dialog.close()
                 refreshGroups()
                 refreshFeatures()
@@ -518,7 +518,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun openEditDialog(feature: AdminFeatureResponse) {
-        val tenant = tenantSelect.value ?: return
+        val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("Edit ${featureName(feature)}")
         val description = TextArea("Description").apply { value = feature.description; maxLength = 2000 }
         val booleanValue = Checkbox("Enabled").apply {
@@ -535,7 +535,7 @@ class MainView(private val service: FeatureToggleService, private val validator:
         dialog.footer.add(Button("Save") {
             runUiAction {
                 service.patchFeature(
-                    tenant.key,
+                    namespace.key,
                     feature.key,
                     feature.group,
                     PatchFeatureRequest(
@@ -554,13 +554,13 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun openDeleteDialog(feature: AdminFeatureResponse) {
-        val tenant = tenantSelect.value ?: return
+        val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("Delete ${featureName(feature)}?")
         dialog.add(Paragraph("This feature and its history will be permanently deleted. This cannot be undone."))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(Button("Delete") {
             runUiAction {
-                service.deleteFeature(tenant.key, feature.key, feature.group, feature.version)
+                service.deleteFeature(namespace.key, feature.key, feature.group, feature.version)
                 dialog.close()
                 refreshFeatures()
                 success("Changes saved")
@@ -570,10 +570,10 @@ class MainView(private val service: FeatureToggleService, private val validator:
     }
 
     private fun openHistoryDialog(feature: AdminFeatureResponse) {
-        val tenant = tenantSelect.value ?: return
+        val namespace = namespaceSelect.value ?: return
         val dialog = newDialog("History: ${featureName(feature)}")
         dialog.width = "850px"
-        val history = Grid(service.history(tenant.key, feature.key, feature.group))
+        val history = Grid(service.history(namespace.key, feature.key, feature.group))
         history.addColumn { HISTORY_DATE_FORMATTER.format(it.changedAt) }.setHeader("Changed at").setAutoWidth(true)
         history.addColumn { it.operation }.setHeader("Operation").setAutoWidth(true)
         history.addColumn { it.oldValue }.setHeader("Old value")

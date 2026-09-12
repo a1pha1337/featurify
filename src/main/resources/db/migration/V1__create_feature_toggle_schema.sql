@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-CREATE TABLE tenant
+CREATE TABLE namespace
 (
     id             UUID PRIMARY KEY      DEFAULT gen_random_uuid(),
     key            VARCHAR(255) NOT NULL,
@@ -8,63 +8,63 @@ CREATE TABLE tenant
     active         BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at     TIMESTAMPTZ  NOT NULL,
     updated_at     TIMESTAMPTZ  NOT NULL,
-    default_tenant BOOLEAN      NOT NULL DEFAULT FALSE,
-    CONSTRAINT uq_tenant_key UNIQUE (key),
-    CONSTRAINT ck_tenant_key CHECK (key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'),
-    CONSTRAINT ck_system_default_tenant CHECK (
-        (default_tenant AND key = 'default' AND display_name = 'Default' AND active)
-        OR (NOT default_tenant AND key <> 'default')
+    default_namespace BOOLEAN      NOT NULL DEFAULT FALSE,
+    CONSTRAINT uq_namespace_key UNIQUE (key),
+    CONSTRAINT ck_namespace_key CHECK (key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'),
+    CONSTRAINT ck_system_default_namespace CHECK (
+        (default_namespace AND key = 'default' AND display_name = 'Default' AND active)
+        OR (NOT default_namespace AND key <> 'default')
     )
 );
 
-CREATE UNIQUE INDEX uq_tenant_default
-    ON tenant (default_tenant)
-    WHERE default_tenant;
+CREATE UNIQUE INDEX uq_namespace_default
+    ON namespace (default_namespace)
+    WHERE default_namespace;
 
-INSERT INTO tenant (key, display_name, active, created_at, updated_at, default_tenant)
+INSERT INTO namespace (key, display_name, active, created_at, updated_at, default_namespace)
 VALUES ('default', 'Default', TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE);
 
-CREATE FUNCTION protect_default_tenant()
+CREATE FUNCTION protect_default_namespace()
     RETURNS TRIGGER
     LANGUAGE plpgsql
 AS
 $$
 BEGIN
-    RAISE EXCEPTION 'The system Default tenant cannot be changed or deleted'
+    RAISE EXCEPTION 'The system Default namespace cannot be changed or deleted'
         USING ERRCODE = '23514';
 END;
 $$;
 
-CREATE TRIGGER trg_protect_default_tenant
-    BEFORE UPDATE OR DELETE ON tenant
-    FOR EACH ROW WHEN (OLD.default_tenant)
-EXECUTE FUNCTION protect_default_tenant();
+CREATE TRIGGER trg_protect_default_namespace
+    BEFORE UPDATE OR DELETE ON namespace
+    FOR EACH ROW WHEN (OLD.default_namespace)
+EXECUTE FUNCTION protect_default_namespace();
 
-CREATE TRIGGER trg_protect_default_tenant_truncate
-    BEFORE TRUNCATE ON tenant
+CREATE TRIGGER trg_protect_default_namespace_truncate
+    BEFORE TRUNCATE ON namespace
     FOR EACH STATEMENT
-EXECUTE FUNCTION protect_default_tenant();
+EXECUTE FUNCTION protect_default_namespace();
 
 CREATE TABLE feature_group
 (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id    UUID         NOT NULL REFERENCES tenant (id) ON DELETE CASCADE,
+    namespace_id    UUID         NOT NULL REFERENCES namespace (id) ON DELETE CASCADE,
     key          VARCHAR(255) NOT NULL,
     display_name VARCHAR(255) NOT NULL,
     version      BIGINT       NOT NULL DEFAULT 0,
     created_at   TIMESTAMPTZ  NOT NULL,
     updated_at   TIMESTAMPTZ  NOT NULL,
-    CONSTRAINT uq_feature_group_tenant_key UNIQUE (tenant_id, key),
-    CONSTRAINT uq_feature_group_id_tenant UNIQUE (id, tenant_id),
+    CONSTRAINT uq_feature_group_namespace_key UNIQUE (namespace_id, key),
+    CONSTRAINT uq_feature_group_id_namespace UNIQUE (id, namespace_id),
     CONSTRAINT ck_feature_group_key CHECK (key ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')
 );
 
-CREATE INDEX ix_feature_group_tenant_key ON feature_group (tenant_id, key);
+CREATE INDEX ix_feature_group_namespace_key ON feature_group (namespace_id, key);
 
 CREATE TABLE feature
 (
     id            UUID PRIMARY KEY       DEFAULT gen_random_uuid(),
-    tenant_id     UUID          NOT NULL REFERENCES tenant (id) ON DELETE CASCADE,
+    namespace_id     UUID          NOT NULL REFERENCES namespace (id) ON DELETE CASCADE,
     group_id      UUID,
     key           VARCHAR(255)  NOT NULL,
     type          VARCHAR(16)   NOT NULL,
@@ -74,8 +74,8 @@ CREATE TABLE feature
     version       BIGINT        NOT NULL DEFAULT 0,
     created_at    TIMESTAMPTZ   NOT NULL,
     updated_at    TIMESTAMPTZ   NOT NULL,
-    CONSTRAINT fk_feature_group_tenant FOREIGN KEY (group_id, tenant_id)
-        REFERENCES feature_group (id, tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_feature_group_namespace FOREIGN KEY (group_id, namespace_id)
+        REFERENCES feature_group (id, namespace_id) ON DELETE CASCADE,
     CONSTRAINT ck_feature_key CHECK (key ~ '^[a-z0-9.-]+$'),
     CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM')),
     CONSTRAINT ck_feature_typed_value CHECK (
@@ -85,15 +85,15 @@ CREATE TABLE feature
         )
 );
 
-CREATE UNIQUE INDEX uq_feature_tenant_group_key
-    ON feature (tenant_id, group_id, key)
+CREATE UNIQUE INDEX uq_feature_namespace_group_key
+    ON feature (namespace_id, group_id, key)
     WHERE group_id IS NOT NULL;
 
-CREATE UNIQUE INDEX uq_feature_tenant_global_key
-    ON feature (tenant_id, key)
+CREATE UNIQUE INDEX uq_feature_namespace_global_key
+    ON feature (namespace_id, key)
     WHERE group_id IS NULL;
 
-CREATE INDEX ix_feature_tenant_key ON feature (tenant_id, group_id, key);
+CREATE INDEX ix_feature_namespace_key ON feature (namespace_id, group_id, key);
 
 CREATE INDEX ix_feature_key_trgm
     ON feature USING GIN (key gin_trgm_ops);
@@ -113,9 +113,9 @@ CREATE TABLE feature_enum_option
 CREATE TABLE feature_audit_log
 (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   UUID         NOT NULL REFERENCES tenant (id) ON DELETE CASCADE,
+    namespace_id   UUID         NOT NULL REFERENCES namespace (id) ON DELETE CASCADE,
     feature_id  UUID         NOT NULL REFERENCES feature (id) ON DELETE CASCADE,
-    tenant_key  VARCHAR(255) NOT NULL,
+    namespace_key  VARCHAR(255) NOT NULL,
     feature_group VARCHAR(255),
     feature_key VARCHAR(255) NOT NULL,
     operation   VARCHAR(32)  NOT NULL,
@@ -129,7 +129,7 @@ CREATE TABLE feature_audit_log
 CREATE INDEX ix_feature_audit_feature_id ON feature_audit_log (feature_id);
 
 CREATE INDEX ix_feature_audit_lookup
-    ON feature_audit_log (tenant_id, feature_group, feature_key, changed_at DESC);
+    ON feature_audit_log (namespace_id, feature_group, feature_key, changed_at DESC);
 
 CREATE FUNCTION prevent_feature_type_change()
     RETURNS TRIGGER

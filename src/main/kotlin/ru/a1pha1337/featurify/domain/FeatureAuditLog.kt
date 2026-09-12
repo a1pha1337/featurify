@@ -8,9 +8,9 @@ import java.util.UUID
 @Table("feature_audit_log")
 data class FeatureAuditLog(
     @Id val id: UUID? = null,
-    val tenantId: UUID,
+    val namespaceId: UUID,
     val featureId: UUID,
-    val tenantKey: String,
+    val namespaceKey: String,
     val featureGroup: String?,
     val featureKey: String,
     val operation: AuditOperation,

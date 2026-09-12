@@ -7,20 +7,20 @@ import ru.a1pha1337.featurify.domain.Feature
 import java.util.UUID
 
 interface FeatureRepository : CrudRepository<Feature, UUID> {
-    fun findAllByTenantIdAndGroupId(
-        tenantId: UUID, groupId: UUID, pageable: Pageable,
+    fun findAllByNamespaceIdAndGroupId(
+        namespaceId: UUID, groupId: UUID, pageable: Pageable,
     ): Page<Feature>
-    fun findAllByTenantIdAndGroupIdAndKeyContaining(
-        tenantId: UUID, groupId: UUID, key: String, pageable: Pageable,
+    fun findAllByNamespaceIdAndGroupIdAndKeyContaining(
+        namespaceId: UUID, groupId: UUID, key: String, pageable: Pageable,
     ): Page<Feature>
-    fun findAllByTenantIdAndGroupIdIsNull(
-        tenantId: UUID, pageable: Pageable,
+    fun findAllByNamespaceIdAndGroupIdIsNull(
+        namespaceId: UUID, pageable: Pageable,
     ): Page<Feature>
-    fun findAllByTenantIdAndGroupIdIsNullAndKeyContaining(
-        tenantId: UUID, key: String, pageable: Pageable,
+    fun findAllByNamespaceIdAndGroupIdIsNullAndKeyContaining(
+        namespaceId: UUID, key: String, pageable: Pageable,
     ): Page<Feature>
-    fun findByTenantIdAndGroupIdAndKey(tenantId: UUID, groupId: UUID, key: String): Feature?
-    fun findByTenantIdAndGroupIdIsNullAndKey(tenantId: UUID, key: String): Feature?
-    fun findAllByTenantId(tenantId: UUID, pageable: Pageable): Page<Feature>
-    fun findAllByTenantIdAndKeyContaining(tenantId: UUID, key: String, pageable: Pageable): Page<Feature>
+    fun findByNamespaceIdAndGroupIdAndKey(namespaceId: UUID, groupId: UUID, key: String): Feature?
+    fun findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId: UUID, key: String): Feature?
+    fun findAllByNamespaceId(namespaceId: UUID, pageable: Pageable): Page<Feature>
+    fun findAllByNamespaceIdAndKeyContaining(namespaceId: UUID, key: String, pageable: Pageable): Page<Feature>
 }

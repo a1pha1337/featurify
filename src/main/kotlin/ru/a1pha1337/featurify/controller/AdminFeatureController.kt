@@ -17,83 +17,83 @@ import ru.a1pha1337.featurify.dto.AuditLogResponse
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.FeatureGroupResponse
-import ru.a1pha1337.featurify.dto.CreateTenantRequest
+import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
-import ru.a1pha1337.featurify.dto.TenantResponse
+import ru.a1pha1337.featurify.dto.NamespaceResponse
 import ru.a1pha1337.featurify.dto.VersionRequest
 import ru.a1pha1337.featurify.service.FeatureToggleService
 
 @RestController
 @RequestMapping("/api/v1")
 class AdminFeatureController(private val service: FeatureToggleService) {
-    @PostMapping("/tenants")
+    @PostMapping("/namespaces")
     @ResponseStatus(HttpStatus.CREATED)
-    fun createTenant(@Valid @RequestBody request: CreateTenantRequest): TenantResponse =
-        service.createTenant(request)
+    fun createNamespace(@Valid @RequestBody request: CreateNamespaceRequest): NamespaceResponse =
+        service.createNamespace(request)
 
-    @GetMapping("/tenants")
-    fun listTenants(): List<TenantResponse> = service.listTenants()
+    @GetMapping("/namespaces")
+    fun listNamespaces(): List<NamespaceResponse> = service.listNamespaces()
 
-    @DeleteMapping("/tenants/{tenantKey}")
+    @DeleteMapping("/namespaces/{namespaceKey}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun deleteTenant(@PathVariable tenantKey: String) = service.deleteTenant(tenantKey)
+    fun deleteNamespace(@PathVariable namespaceKey: String) = service.deleteNamespace(namespaceKey)
 
     @PostMapping("/groups")
     @ResponseStatus(HttpStatus.CREATED)
     fun createGroup(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @Valid @RequestBody request: CreateFeatureGroupRequest,
-    ): FeatureGroupResponse = service.createGroup(tenant, request)
+    ): FeatureGroupResponse = service.createGroup(namespace, request)
 
     @GetMapping("/groups")
-    fun listGroups(@RequestParam(required = false) tenant: String?): List<FeatureGroupResponse> =
-        service.listGroups(tenant)
+    fun listGroups(@RequestParam(required = false) namespace: String?): List<FeatureGroupResponse> =
+        service.listGroups(namespace)
 
     @DeleteMapping("/groups/{groupKey}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun deleteGroup(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @PathVariable groupKey: String,
         @Valid @RequestBody request: VersionRequest,
-    ) = service.deleteGroup(tenant, groupKey, request.version)
+    ) = service.deleteGroup(namespace, groupKey, request.version)
 
     @PostMapping("/features")
     @ResponseStatus(HttpStatus.CREATED)
     fun createFeature(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @Valid @RequestBody request: CreateFeatureRequest,
-    ): AdminFeatureResponse = service.createFeature(tenant, request)
+    ): AdminFeatureResponse = service.createFeature(namespace, request)
 
     @PatchMapping("/features/{key}")
     fun patchFeature(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
         @Valid @RequestBody request: PatchFeatureRequest,
-    ): AdminFeatureResponse = service.patchFeature(tenant, key, group, request)
+    ): AdminFeatureResponse = service.patchFeature(namespace, key, group, request)
 
     @PatchMapping("/features/{key}/group")
     fun moveFeature(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
         @Valid @RequestBody request: MoveFeatureRequest,
-    ): AdminFeatureResponse = service.moveFeature(tenant, key, group, request)
+    ): AdminFeatureResponse = service.moveFeature(namespace, key, group, request)
 
     @DeleteMapping("/features/{key}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun deleteFeature(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
         @Valid @RequestBody request: VersionRequest,
-    ) = service.deleteFeature(tenant, key, group, request.version)
+    ) = service.deleteFeature(namespace, key, group, request.version)
 
     @GetMapping("/features/{key}/history")
     fun history(
-        @RequestParam(required = false) tenant: String?,
+        @RequestParam(required = false) namespace: String?,
         @RequestParam(required = false) group: String?,
         @PathVariable key: String,
-    ): List<AuditLogResponse> = service.history(tenant, key, group)
+    ): List<AuditLogResponse> = service.history(namespace, key, group)
 }

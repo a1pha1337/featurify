@@ -10,12 +10,12 @@ import ru.a1pha1337.featurify.dto.AuditLogResponse
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.FeatureGroupResponse
-import ru.a1pha1337.featurify.dto.CreateTenantRequest
+import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.dto.FeatureResponse
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.dto.ResolveResponse
-import ru.a1pha1337.featurify.dto.TenantResponse
+import ru.a1pha1337.featurify.dto.NamespaceResponse
 import ru.a1pha1337.featurify.dto.ValidationPatterns
 import ru.a1pha1337.featurify.domain.AuditOperation
 import ru.a1pha1337.featurify.domain.Feature
@@ -23,12 +23,12 @@ import ru.a1pha1337.featurify.domain.FeatureAuditLog
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
-import ru.a1pha1337.featurify.domain.Tenant
+import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
 import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
 import ru.a1pha1337.featurify.repository.FeatureRepository
-import ru.a1pha1337.featurify.repository.TenantRepository
+import ru.a1pha1337.featurify.repository.NamespaceRepository
 import ru.a1pha1337.featurify.security.ActorProvider
 import java.time.Clock
 import java.time.Instant
@@ -36,7 +36,7 @@ import java.util.UUID
 
 @Service
 class FeatureToggleService(
-    private val tenantRepository: TenantRepository,
+    private val namespaceRepository: NamespaceRepository,
     private val featureRepository: FeatureRepository,
     private val groupRepository: FeatureGroupRepository,
     private val optionRepository: FeatureEnumOptionRepository,
@@ -45,37 +45,37 @@ class FeatureToggleService(
     private val clock: Clock,
 ) {
     @Transactional
-    fun createTenant(request: CreateTenantRequest): TenantResponse {
+    fun createNamespace(request: CreateNamespaceRequest): NamespaceResponse {
         val now = clock.instant()
-        if (request.key == "default") throw validation("key", "is reserved for the system Default tenant")
-        return tenantRepository.save(
-            Tenant(
+        if (request.key == "default") throw validation("key", "is reserved for the system Default namespace")
+        return namespaceRepository.save(
+            Namespace(
                 key = request.key,
                 displayName = request.displayName,
                 createdAt = now,
                 updatedAt = now,
-                defaultTenant = false,
+                defaultNamespace = false,
             ),
         ).toResponse()
     }
 
     @Transactional(readOnly = true)
-    fun listTenants(): List<TenantResponse> = tenantRepository.findAllByOrderByKey().map { it.toResponse() }
+    fun listNamespaces(): List<NamespaceResponse> = namespaceRepository.findAllByOrderByKey().map { it.toResponse() }
 
     @Transactional
-    fun createGroup(tenantKey: String?, request: CreateFeatureGroupRequest): FeatureGroupResponse {
-        val tenant = requireTenant(tenantKey)
+    fun createGroup(namespaceKey: String?, request: CreateFeatureGroupRequest): FeatureGroupResponse {
+        val namespace = requireNamespace(namespaceKey)
         val key = normalizeGroup(request.key) ?: throw validation("key", "must not be blank")
         if (request.displayName.isBlank() || request.displayName.length > 255) {
             throw validation("displayName", "must contain between 1 and 255 characters")
         }
-        if (groupRepository.findByTenantIdAndKey(tenant.id!!, key) != null) {
-            throw ConflictException("Group '$key' already exists in this tenant. Choose another key.")
+        if (groupRepository.findByNamespaceIdAndKey(namespace.id!!, key) != null) {
+            throw ConflictException("Group '$key' already exists in this namespace. Choose another key.")
         }
         val now = clock.instant()
         return groupRepository.save(
             FeatureGroup(
-                tenantId = tenant.id!!,
+                namespaceId = namespace.id!!,
                 key = key,
                 displayName = request.displayName.trim(),
                 createdAt = now,
@@ -85,24 +85,24 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun listGroups(tenantKey: String?): List<FeatureGroupResponse> {
-        val tenant = requireTenant(tenantKey)
-        return groupRepository.findAllByTenantIdOrderByKey(tenant.id!!).map { it.toResponse() }
+    fun listGroups(namespaceKey: String?): List<FeatureGroupResponse> {
+        val namespace = requireNamespace(namespaceKey)
+        return groupRepository.findAllByNamespaceIdOrderByKey(namespace.id!!).map { it.toResponse() }
     }
 
     @Transactional
-    fun deleteTenant(tenantKey: String) {
-        val tenant = requireTenant(tenantKey)
-        if (tenant.defaultTenant || tenant.key == "default") {
-            throw ConflictException("The system Default tenant cannot be deleted")
+    fun deleteNamespace(namespaceKey: String) {
+        val namespace = requireNamespace(namespaceKey)
+        if (namespace.defaultNamespace || namespace.key == "default") {
+            throw ConflictException("The system Default namespace cannot be deleted")
         }
-        tenantRepository.delete(tenant)
+        namespaceRepository.delete(namespace)
     }
 
     @Transactional
-    fun deleteGroup(tenantKey: String?, groupKey: String, version: Long?) {
-        val tenant = requireTenant(tenantKey)
-        val group = requireGroup(tenant.id!!, groupKey)
+    fun deleteGroup(namespaceKey: String?, groupKey: String, version: Long?) {
+        val namespace = requireNamespace(namespaceKey)
+        val group = requireGroup(namespace.id!!, groupKey)
         requireVersion(group.version, version)
         try {
             groupRepository.delete(group)
@@ -113,22 +113,22 @@ class FeatureToggleService(
 
     @Transactional
     fun moveFeature(
-        tenantKey: String?,
+        namespaceKey: String?,
         key: String,
         currentGroup: String?,
         request: MoveFeatureRequest,
     ): AdminFeatureResponse {
-        val tenant = requireTenant(tenantKey)
+        val namespace = requireNamespace(namespaceKey)
         val currentGroupKey = normalizeGroup(currentGroup)
-        val current = requireFeature(tenant.id!!, key, currentGroupKey)
+        val current = requireFeature(namespace.id!!, key, currentGroupKey)
         requireVersion(current, request.version)
         val targetGroupKey = normalizeGroup(request.targetGroup)
-        val targetGroup = targetGroupKey?.let { requireGroup(tenant.id!!, it) }
+        val targetGroup = targetGroupKey?.let { requireGroup(namespace.id!!, it) }
         if (targetGroup?.id == current.groupId) return current.toAdminResponse(targetGroupKey, optionsFor(current))
         val existing = if (targetGroup == null) {
-            featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenant.id, key)
+            featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespace.id, key)
         } else {
-            featureRepository.findByTenantIdAndGroupIdAndKey(tenant.id, targetGroup.id!!, key)
+            featureRepository.findByNamespaceIdAndGroupIdAndKey(namespace.id, targetGroup.id!!, key)
         }
         if (existing != null) {
             throw ConflictException("Feature '$key' already exists in ${targetGroupKey ?: "Global"}. Choose another group.")
@@ -138,15 +138,15 @@ class FeatureToggleService(
     }
 
     @Transactional
-    fun createFeature(tenantKey: String?, request: CreateFeatureRequest): AdminFeatureResponse {
-        val tenant = requireTenant(tenantKey)
+    fun createFeature(namespaceKey: String?, request: CreateFeatureRequest): AdminFeatureResponse {
+        val namespace = requireNamespace(namespaceKey)
         val type = request.type ?: throw validation("type", "must not be null")
-        val group = normalizeGroup(request.group)?.let { requireGroup(tenant.id!!, it) }
+        val group = normalizeGroup(request.group)?.let { requireGroup(namespace.id!!, it) }
         validateCreation(request, type)
         val now = clock.instant()
         val saved = featureRepository.save(
             Feature(
-                tenantId = tenant.id!!,
+                namespaceId = namespace.id!!,
                 key = request.key,
                 type = type,
                 groupId = group?.id,
@@ -169,14 +169,14 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun listFeatures(tenantKey: String?, pageable: Pageable, query: String?): Page<FeatureResponse> {
-        val tenant = requireActiveTenant(tenantKey)
+    fun listFeatures(namespaceKey: String?, pageable: Pageable, query: String?): Page<FeatureResponse> {
+        val namespace = requireActiveNamespace(namespaceKey)
         val normalizedQuery = normalizeQuery(query)
         val features = if (normalizedQuery == null) {
-            featureRepository.findAllByTenantId(tenant.id!!, pageable)
+            featureRepository.findAllByNamespaceId(namespace.id!!, pageable)
         } else {
-            featureRepository.findAllByTenantIdAndKeyContaining(
-                tenant.id!!,
+            featureRepository.findAllByNamespaceIdAndKeyContaining(
+                namespace.id!!,
                 normalizedQuery,
                 pageable,
             )
@@ -185,22 +185,22 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun getFeature(tenantKey: String?, key: String, group: String?): FeatureResponse {
-        val tenant = requireActiveTenant(tenantKey)
-        val feature = requireFeature(tenant.id!!, key, normalizeGroup(group))
+    fun getFeature(namespaceKey: String?, key: String, group: String?): FeatureResponse {
+        val namespace = requireActiveNamespace(namespaceKey)
+        val feature = requireFeature(namespace.id!!, key, normalizeGroup(group))
         return feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
     }
 
     @Transactional(readOnly = true)
-    fun resolve(tenantKey: String?, keys: List<String>, group: String?): ResolveResponse {
+    fun resolve(namespaceKey: String?, keys: List<String>, group: String?): ResolveResponse {
         if (keys.isEmpty() || keys.any { it.isBlank() }) {
             throw validation("keys", "must contain at least one non-blank key")
         }
-        val tenant = requireActiveTenant(tenantKey)
+        val namespace = requireActiveNamespace(namespaceKey)
         val groupKey = normalizeGroup(group)
         val resolved = LinkedHashMap<String, FeatureResponse>()
         keys.distinct().forEach { key ->
-            val feature = requireFeature(tenant.id!!, key, groupKey)
+            val feature = requireFeature(namespace.id!!, key, groupKey)
             resolved[key] = feature.toPublicResponse(groupKeyFor(feature), optionsFor(feature))
         }
         return ResolveResponse(resolved)
@@ -208,36 +208,36 @@ class FeatureToggleService(
 
     @Transactional(readOnly = true)
     fun listForAdmin(
-        tenantKey: String?,
+        namespaceKey: String?,
         pageable: Pageable,
         query: String?,
         group: String? = null,
         globalOnly: Boolean = false,
     ): Page<AdminFeatureResponse> {
-        val tenant = requireTenant(tenantKey)
+        val namespace = requireNamespace(namespaceKey)
         val normalizedQuery = normalizeQuery(query)
-        val groupId = normalizeGroup(group)?.let { requireGroup(tenant.id!!, it).id!! }
+        val groupId = normalizeGroup(group)?.let { requireGroup(namespace.id!!, it).id!! }
         val features = if (groupId != null) {
             if (normalizedQuery == null) {
-                featureRepository.findAllByTenantIdAndGroupId(tenant.id!!, groupId, pageable)
+                featureRepository.findAllByNamespaceIdAndGroupId(namespace.id!!, groupId, pageable)
             } else {
-                featureRepository.findAllByTenantIdAndGroupIdAndKeyContaining(
-                    tenant.id!!, groupId, normalizedQuery, pageable,
+                featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
+                    namespace.id!!, groupId, normalizedQuery, pageable,
                 )
             }
         } else if (globalOnly) {
             if (normalizedQuery == null) {
-                featureRepository.findAllByTenantIdAndGroupIdIsNull(tenant.id!!, pageable)
+                featureRepository.findAllByNamespaceIdAndGroupIdIsNull(namespace.id!!, pageable)
             } else {
-                featureRepository.findAllByTenantIdAndGroupIdIsNullAndKeyContaining(
-                    tenant.id!!, normalizedQuery, pageable,
+                featureRepository.findAllByNamespaceIdAndGroupIdIsNullAndKeyContaining(
+                    namespace.id!!, normalizedQuery, pageable,
                 )
             }
         } else if (normalizedQuery == null) {
-            featureRepository.findAllByTenantId(tenant.id!!, pageable)
+            featureRepository.findAllByNamespaceId(namespace.id!!, pageable)
         } else {
-            featureRepository.findAllByTenantIdAndKeyContaining(
-                tenant.id!!,
+            featureRepository.findAllByNamespaceIdAndKeyContaining(
+                namespace.id!!,
                 normalizedQuery,
                 pageable,
             )
@@ -247,14 +247,14 @@ class FeatureToggleService(
 
     @Transactional
     fun patchFeature(
-        tenantKey: String?,
+        namespaceKey: String?,
         key: String,
         group: String?,
         request: PatchFeatureRequest,
     ): AdminFeatureResponse {
-        val tenant = requireTenant(tenantKey)
+        val namespace = requireNamespace(namespaceKey)
         val groupKey = normalizeGroup(group)
-        val current = requireFeature(tenant.id!!, key, groupKey)
+        val current = requireFeature(namespace.id!!, key, groupKey)
         requireVersion(current, request.version)
         validatePatch(current, request)
 
@@ -273,15 +273,15 @@ class FeatureToggleService(
         )
         val saved = saveWithConflict(changed)
         if (current.valueAsString() != saved.valueAsString()) {
-            audit(tenant, saved, AuditOperation.VALUE_CHANGED, current.valueAsString(), saved.valueAsString())
+            audit(namespace, saved, AuditOperation.VALUE_CHANGED, current.valueAsString(), saved.valueAsString())
         }
         return saved.toAdminResponse(groupKeyFor(saved), optionsFor(saved))
     }
 
     @Transactional
-    fun deleteFeature(tenantKey: String?, key: String, group: String?, version: Long?) {
-        val tenant = requireTenant(tenantKey)
-        val current = requireFeature(tenant.id!!, key, normalizeGroup(group))
+    fun deleteFeature(namespaceKey: String?, key: String, group: String?, version: Long?) {
+        val namespace = requireNamespace(namespaceKey)
+        val current = requireFeature(namespace.id!!, key, normalizeGroup(group))
         requireVersion(current, version)
         try {
             featureRepository.delete(current)
@@ -291,15 +291,15 @@ class FeatureToggleService(
     }
 
     @Transactional(readOnly = true)
-    fun history(tenantKey: String?, key: String, group: String?): List<AuditLogResponse> {
-        val tenant = requireTenant(tenantKey)
+    fun history(namespaceKey: String?, key: String, group: String?): List<AuditLogResponse> {
+        val namespace = requireNamespace(namespaceKey)
         val groupKey = normalizeGroup(group)
-        requireFeature(tenant.id!!, key, groupKey)
+        requireFeature(namespace.id!!, key, groupKey)
         val entries = if (groupKey == null) {
-            auditRepository.findAllByTenantIdAndFeatureGroupIsNullAndFeatureKeyOrderByChangedAtDesc(tenant.id, key)
+            auditRepository.findAllByNamespaceIdAndFeatureGroupIsNullAndFeatureKeyOrderByChangedAtDesc(namespace.id, key)
         } else {
-            auditRepository.findAllByTenantIdAndFeatureGroupAndFeatureKeyOrderByChangedAtDesc(
-                tenant.id,
+            auditRepository.findAllByNamespaceIdAndFeatureGroupAndFeatureKeyOrderByChangedAtDesc(
+                namespace.id,
                 groupKey,
                 key,
             )
@@ -364,7 +364,7 @@ class FeatureToggleService(
     }
 
     private fun audit(
-        tenant: Tenant,
+        namespace: Namespace,
         feature: Feature,
         operation: AuditOperation,
         oldValue: String?,
@@ -372,9 +372,9 @@ class FeatureToggleService(
     ) {
         auditRepository.save(
             FeatureAuditLog(
-                tenantId = tenant.id!!,
+                namespaceId = namespace.id!!,
                 featureId = feature.id!!,
-                tenantKey = tenant.key,
+                namespaceKey = namespace.key,
                 featureGroup = groupKeyFor(feature),
                 featureKey = feature.key,
                 operation = operation,
@@ -386,24 +386,24 @@ class FeatureToggleService(
         )
     }
 
-    private fun requireTenant(tenantKey: String?): Tenant = if (tenantKey == null) {
-        tenantRepository.findByDefaultTenantTrue()
-            ?: throw NotFoundException("Default tenant was not found")
+    private fun requireNamespace(namespaceKey: String?): Namespace = if (namespaceKey == null) {
+        namespaceRepository.findByDefaultNamespaceTrue()
+            ?: throw NotFoundException("Default namespace was not found")
     } else {
-        tenantRepository.findByKey(tenantKey)
-            ?: throw NotFoundException("Tenant '$tenantKey' was not found")
+        namespaceRepository.findByKey(namespaceKey)
+            ?: throw NotFoundException("Namespace '$namespaceKey' was not found")
     }
 
-    private fun requireActiveTenant(tenantKey: String?): Tenant = requireTenant(tenantKey).also {
-        if (!it.active) throw NotFoundException("Tenant '${tenantKey ?: it.key}' was not found")
+    private fun requireActiveNamespace(namespaceKey: String?): Namespace = requireNamespace(namespaceKey).also {
+        if (!it.active) throw NotFoundException("Namespace '${namespaceKey ?: it.key}' was not found")
     }
 
-    private fun requireFeature(tenantId: UUID, key: String, group: String?): Feature {
-        val groupId = group?.let { requireGroup(tenantId, it).id!! }
+    private fun requireFeature(namespaceId: UUID, key: String, group: String?): Feature {
+        val groupId = group?.let { requireGroup(namespaceId, it).id!! }
         val feature = if (groupId == null) {
-            featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, key)
+            featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, key)
         } else {
-            featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, key)
+            featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, key)
         }
         return feature ?: throw NotFoundException("Feature '${featureName(group, key)}' was not found")
     }
@@ -418,8 +418,8 @@ class FeatureToggleService(
 
     private fun featureName(group: String?, key: String) = group?.let { "$it/$key" } ?: key
 
-    private fun requireGroup(tenantId: UUID, key: String): FeatureGroup =
-        groupRepository.findByTenantIdAndKey(tenantId, key)
+    private fun requireGroup(namespaceId: UUID, key: String): FeatureGroup =
+        groupRepository.findByNamespaceIdAndKey(namespaceId, key)
             ?: throw NotFoundException("Group '$key' was not found")
 
     private fun requireVersion(version: Long?, requested: Long?) {
@@ -445,7 +445,7 @@ class FeatureToggleService(
         return normalized
     }
 
-    private fun Tenant.toResponse() = TenantResponse(id!!, key, displayName, active, createdAt, updatedAt, defaultTenant)
+    private fun Namespace.toResponse() = NamespaceResponse(id!!, key, displayName, active, createdAt, updatedAt, defaultNamespace)
 
     private fun FeatureGroup.toResponse() = FeatureGroupResponse(
         id = id!!,

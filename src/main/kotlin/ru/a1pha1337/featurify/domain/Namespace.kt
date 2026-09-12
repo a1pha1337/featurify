@@ -5,13 +5,13 @@ import org.springframework.data.relational.core.mapping.Table
 import java.time.Instant
 import java.util.UUID
 
-@Table("tenant")
-data class Tenant(
+@Table("namespace")
+data class Namespace(
     @Id val id: UUID? = null,
     val key: String,
     val displayName: String,
     val active: Boolean = true,
     val createdAt: Instant,
     val updatedAt: Instant,
-    val defaultTenant: Boolean = false,
+    val defaultNamespace: Boolean = false,
 )

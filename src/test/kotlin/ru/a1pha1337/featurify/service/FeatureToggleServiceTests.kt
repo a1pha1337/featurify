@@ -14,19 +14,19 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
-import ru.a1pha1337.featurify.dto.CreateTenantRequest
+import ru.a1pha1337.featurify.dto.CreateNamespaceRequest
 import ru.a1pha1337.featurify.dto.MoveFeatureRequest
 import ru.a1pha1337.featurify.dto.PatchFeatureRequest
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureEnumOption
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
-import ru.a1pha1337.featurify.domain.Tenant
+import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.repository.FeatureAuditLogRepository
 import ru.a1pha1337.featurify.repository.FeatureEnumOptionRepository
 import ru.a1pha1337.featurify.repository.FeatureGroupRepository
 import ru.a1pha1337.featurify.repository.FeatureRepository
-import ru.a1pha1337.featurify.repository.TenantRepository
+import ru.a1pha1337.featurify.repository.NamespaceRepository
 import ru.a1pha1337.featurify.security.ActorProvider
 import java.time.Clock
 import java.time.Instant
@@ -35,14 +35,14 @@ import java.util.UUID
 import java.util.Optional
 
 class FeatureToggleServiceTests {
-    private val tenantRepository = mock(TenantRepository::class.java)
+    private val namespaceRepository = mock(NamespaceRepository::class.java)
     private val featureRepository = mock(FeatureRepository::class.java)
     private val groupRepository = mock(FeatureGroupRepository::class.java)
     private val optionRepository = mock(FeatureEnumOptionRepository::class.java)
     private val auditRepository = mock(FeatureAuditLogRepository::class.java)
     private val actorProvider = mock(ActorProvider::class.java)
     private val now = Instant.parse("2026-09-11T12:00:00Z")
-    private val tenantId = UUID.randomUUID()
+    private val namespaceId = UUID.randomUUID()
     private val featureId = UUID.randomUUID()
     private lateinit var service: FeatureToggleService
 
@@ -50,7 +50,7 @@ class FeatureToggleServiceTests {
     fun setUp() {
         `when`(actorProvider.currentUsername()).thenReturn("test-user")
         service = FeatureToggleService(
-            tenantRepository,
+            namespaceRepository,
             featureRepository,
             groupRepository,
             optionRepository,
@@ -58,8 +58,8 @@ class FeatureToggleServiceTests {
             actorProvider,
             Clock.fixed(now, ZoneOffset.UTC),
         )
-        `when`(tenantRepository.findByKey("blue")).thenReturn(
-            Tenant(tenantId, "blue", "Blue", true, now, now),
+        `when`(namespaceRepository.findByKey("blue")).thenReturn(
+            Namespace(namespaceId, "blue", "Blue", true, now, now),
         )
     }
 
@@ -84,7 +84,7 @@ class FeatureToggleServiceTests {
     @Test
     fun `stale version is rejected before update`() {
         val feature = booleanFeature(version = 5)
-        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
 
         assertThrows(ConflictException::class.java) {
             service.patchFeature("blue", feature.key, null, PatchFeatureRequest(version = 4, booleanValue = true))
@@ -94,45 +94,45 @@ class FeatureToggleServiceTests {
     }
 
     @Test
-    fun `grouped feature lookup uses tenant group and key`() {
+    fun `grouped feature lookup uses namespace group and key`() {
         val groupId = UUID.randomUUID()
-        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(version = 2).copy(groupId = groupId)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
         `when`(groupRepository.findById(groupId)).thenReturn(Optional.of(group))
         `when`(
-            featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key),
+            featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key),
         ).thenReturn(feature)
 
         val result = service.getFeature("blue", feature.key, "checkout")
 
         assertEquals("checkout", result.group)
         assertEquals(feature.key, result.key)
-        verify(featureRepository).findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key)
-        verify(featureRepository, never()).findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)
+        verify(featureRepository).findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key)
+        verify(featureRepository, never()).findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)
     }
 
     @Test
     fun `feature without group uses global lookup`() {
         val feature = booleanFeature(version = 2)
-        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
 
         val result = service.getFeature("blue", feature.key, null)
 
         assertEquals(null, result.group)
-        verify(featureRepository).findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)
+        verify(featureRepository).findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)
     }
 
     @Test
     fun `moving feature updates its group`() {
         val sourceId = UUID.randomUUID()
         val targetId = UUID.randomUUID()
-        val source = FeatureGroup(sourceId, tenantId, "old", "Old", createdAt = now, updatedAt = now)
-        val target = FeatureGroup(targetId, tenantId, "new", "New", createdAt = now, updatedAt = now)
+        val source = FeatureGroup(sourceId, namespaceId, "old", "Old", createdAt = now, updatedAt = now)
+        val target = FeatureGroup(targetId, namespaceId, "new", "New", createdAt = now, updatedAt = now)
         val feature = booleanFeature(version = 2).copy(groupId = sourceId)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, "old")).thenReturn(source)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, "new")).thenReturn(target)
-        `when`(featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, sourceId, feature.key)).thenReturn(feature)
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "old")).thenReturn(source)
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "new")).thenReturn(target)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, sourceId, feature.key)).thenReturn(feature)
         `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
             .thenAnswer { invocation -> invocation.getArgument(0) }
         `when`(groupRepository.findById(targetId)).thenReturn(Optional.of(target))
@@ -150,7 +150,7 @@ class FeatureToggleServiceTests {
         val pageable = PageRequest.of(1, 10, Sort.by("key"))
         val feature = booleanFeature(version = 2)
         `when`(
-            featureRepository.findAllByTenantId(tenantId, pageable),
+            featureRepository.findAllByNamespaceId(namespaceId, pageable),
         ).thenReturn(PageImpl(listOf(feature), pageable, 11))
 
         val result = service.listFeatures("blue", pageable, null)
@@ -166,8 +166,8 @@ class FeatureToggleServiceTests {
         val pageable = PageRequest.of(0, 10, Sort.by("key"))
         val feature = booleanFeature(version = 2)
         `when`(
-            featureRepository.findAllByTenantIdAndKeyContaining(
-                tenantId,
+            featureRepository.findAllByNamespaceIdAndKeyContaining(
+                namespaceId,
                 "checkout",
                 pageable,
             ),
@@ -176,8 +176,8 @@ class FeatureToggleServiceTests {
         val result = service.listFeatures("blue", pageable, " CHECKOUT ")
 
         assertEquals(feature.key, result.content.single().key)
-        verify(featureRepository).findAllByTenantIdAndKeyContaining(
-            tenantId,
+        verify(featureRepository).findAllByNamespaceIdAndKeyContaining(
+            namespaceId,
             "checkout",
             pageable,
         )
@@ -195,10 +195,10 @@ class FeatureToggleServiceTests {
     }
 
     @Test
-    fun `feature without tenant is created in default tenant`() {
-        val defaultTenantId = UUID.randomUUID()
-        `when`(tenantRepository.findByDefaultTenantTrue()).thenReturn(
-            Tenant(defaultTenantId, "default", "Default", true, now, now, true),
+    fun `feature without namespace is created in default namespace`() {
+        val defaultNamespaceId = UUID.randomUUID()
+        `when`(namespaceRepository.findByDefaultNamespaceTrue()).thenReturn(
+            Namespace(defaultNamespaceId, "default", "Default", true, now, now, true),
         )
         `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
             .thenAnswer { invocation -> invocation.getArgument(0) }
@@ -214,14 +214,14 @@ class FeatureToggleServiceTests {
 
         val featureCaptor = ArgumentCaptor.forClass(Feature::class.java)
         verify(featureRepository).save(featureCaptor.capture())
-        assertEquals(defaultTenantId, featureCaptor.value.tenantId)
+        assertEquals(defaultNamespaceId, featureCaptor.value.namespaceId)
     }
 
     @Test
     fun `enum patch validates against options`() {
         val feature = Feature(
             id = featureId,
-            tenantId = tenantId,
+            namespaceId = namespaceId,
             key = "checkout.pet",
             type = FeatureType.ENUM,
             enumValue = "CAT",
@@ -229,7 +229,7 @@ class FeatureToggleServiceTests {
             createdAt = now,
             updatedAt = now,
         )
-        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
         `when`(optionRepository.findAllByFeatureIdOrderBySortOrder(featureId)).thenReturn(
             listOf(FeatureEnumOption(UUID.randomUUID(), featureId, "CAT", 0)),
         )
@@ -256,8 +256,8 @@ class FeatureToggleServiceTests {
         assertThrows(DomainValidationException::class.java) {
             service.createGroup("blue", CreateFeatureGroupRequest("checkout", " "))
         }
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(
-            FeatureGroup(UUID.randomUUID(), tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now),
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(
+            FeatureGroup(UUID.randomUUID(), namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now),
         )
         assertThrows(ConflictException::class.java) {
             service.createGroup("blue", CreateFeatureGroupRequest("checkout", "Checkout"))
@@ -268,10 +268,10 @@ class FeatureToggleServiceTests {
     @Test
     fun `moving grouped feature to global clears group id`() {
         val groupId = UUID.randomUUID()
-        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(2).copy(groupId = groupId)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key)).thenReturn(feature)
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key)).thenReturn(feature)
         `when`(featureRepository.save(org.mockito.ArgumentMatchers.any(Feature::class.java)))
             .thenAnswer { it.getArgument<Feature>(0) }
 
@@ -286,11 +286,11 @@ class FeatureToggleServiceTests {
     @Test
     fun `move rejects occupied destination`() {
         val groupId = UUID.randomUUID()
-        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val feature = booleanFeature(2)
-        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findByTenantIdAndGroupIdAndKey(tenantId, groupId, feature.key))
+        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdAndKey(namespaceId, groupId, feature.key))
             .thenReturn(feature.copy(id = UUID.randomUUID(), groupId = groupId))
 
         assertThrows(ConflictException::class.java) {
@@ -302,61 +302,61 @@ class FeatureToggleServiceTests {
     @Test
     fun `group filter is applied before pagination and combined with search`() {
         val groupId = UUID.randomUUID()
-        val group = FeatureGroup(groupId, tenantId, "checkout", "Checkout", createdAt = now, updatedAt = now)
+        val group = FeatureGroup(groupId, namespaceId, "checkout", "Checkout", createdAt = now, updatedAt = now)
         val page = PageRequest.of(1, 20)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, "checkout")).thenReturn(group)
-        `when`(featureRepository.findAllByTenantIdAndGroupIdAndKeyContaining(
-            tenantId, groupId, "checkout", page,
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, "checkout")).thenReturn(group)
+        `when`(featureRepository.findAllByNamespaceIdAndGroupIdAndKeyContaining(
+            namespaceId, groupId, "checkout", page,
         )).thenReturn(PageImpl(emptyList(), page, 21))
 
         val result = service.listForAdmin("blue", page, " CHECKOUT ", "checkout")
 
         assertEquals(21, result.totalElements)
         assertEquals(1, result.number)
-        verify(featureRepository).findAllByTenantIdAndGroupIdAndKeyContaining(
-            tenantId, groupId, "checkout", page,
+        verify(featureRepository).findAllByNamespaceIdAndGroupIdAndKeyContaining(
+            namespaceId, groupId, "checkout", page,
         )
     }
 
     @Test
     fun `global filter does not include grouped features`() {
         val page = PageRequest.of(0, 20)
-        `when`(featureRepository.findAllByTenantIdAndGroupIdIsNull(tenantId, page))
+        `when`(featureRepository.findAllByNamespaceIdAndGroupIdIsNull(namespaceId, page))
             .thenReturn(PageImpl(listOf(booleanFeature(1)), page, 1))
 
         val result = service.listForAdmin("blue", page, null, globalOnly = true)
 
         assertEquals(null, result.content.single().group)
-        verify(featureRepository).findAllByTenantIdAndGroupIdIsNull(tenantId, page)
+        verify(featureRepository).findAllByNamespaceIdAndGroupIdIsNull(namespaceId, page)
     }
 
     @Test
-    fun `new tenant is never default`() {
-        `when`(tenantRepository.save(org.mockito.ArgumentMatchers.any(Tenant::class.java)))
-            .thenAnswer { it.getArgument<Tenant>(0).copy(id = UUID.randomUUID()) }
+    fun `new namespace is never default`() {
+        `when`(namespaceRepository.save(org.mockito.ArgumentMatchers.any(Namespace::class.java)))
+            .thenAnswer { it.getArgument<Namespace>(0).copy(id = UUID.randomUUID()) }
 
-        val created = service.createTenant(CreateTenantRequest("green", "Green"))
+        val created = service.createNamespace(CreateNamespaceRequest("green", "Green"))
 
-        assertEquals(false, created.defaultTenant)
-        val saved = ArgumentCaptor.forClass(Tenant::class.java)
-        verify(tenantRepository).save(saved.capture())
-        assertEquals(false, saved.value.defaultTenant)
+        assertEquals(false, created.defaultNamespace)
+        val saved = ArgumentCaptor.forClass(Namespace::class.java)
+        verify(namespaceRepository).save(saved.capture())
+        assertEquals(false, saved.value.defaultNamespace)
     }
 
     @Test
-    fun `system default tenant cannot be created through service`() {
+    fun `system default namespace cannot be created through service`() {
         val error = assertThrows(DomainValidationException::class.java) {
-            service.createTenant(CreateTenantRequest("default", "Replacement"))
+            service.createNamespace(CreateNamespaceRequest("default", "Replacement"))
         }
 
         assertEquals("key", error.violations.single().first)
-        verify(tenantRepository, never()).save(org.mockito.ArgumentMatchers.any())
+        verify(namespaceRepository, never()).save(org.mockito.ArgumentMatchers.any())
     }
 
     @Test
     fun `delete feature requires current version`() {
         val feature = booleanFeature(3)
-        `when`(featureRepository.findByTenantIdAndGroupIdIsNullAndKey(tenantId, feature.key)).thenReturn(feature)
+        `when`(featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, feature.key)).thenReturn(feature)
         assertThrows(ConflictException::class.java) { service.deleteFeature("blue", feature.key, null, 2) }
         assertThrows(DomainValidationException::class.java) { service.deleteFeature("blue", feature.key, null, null) }
         verify(featureRepository, never()).delete(feature)
@@ -366,8 +366,8 @@ class FeatureToggleServiceTests {
 
     @Test
     fun `delete group requires current version`() {
-        val group = FeatureGroup(UUID.randomUUID(), tenantId, "checkout", "Checkout", version = 3, createdAt = now, updatedAt = now)
-        `when`(groupRepository.findByTenantIdAndKey(tenantId, group.key)).thenReturn(group)
+        val group = FeatureGroup(UUID.randomUUID(), namespaceId, "checkout", "Checkout", version = 3, createdAt = now, updatedAt = now)
+        `when`(groupRepository.findByNamespaceIdAndKey(namespaceId, group.key)).thenReturn(group)
         assertThrows(ConflictException::class.java) { service.deleteGroup("blue", group.key, 2) }
         assertThrows(DomainValidationException::class.java) { service.deleteGroup("blue", group.key, null) }
         verify(groupRepository, never()).delete(group)
@@ -376,20 +376,20 @@ class FeatureToggleServiceTests {
     }
 
     @Test
-    fun `delete tenant rejects default and unknown tenant`() {
-        val default = Tenant(UUID.randomUUID(), "default", "Default", true, now, now, true)
-        `when`(tenantRepository.findByKey("default")).thenReturn(default)
-        assertThrows(ConflictException::class.java) { service.deleteTenant("default") }
-        assertThrows(NotFoundException::class.java) { service.deleteTenant("missing") }
-        verify(tenantRepository, never()).delete(default)
-        service.deleteTenant("blue")
-        val blue = Tenant(tenantId, "blue", "Blue", true, now, now)
-        verify(tenantRepository).delete(blue)
+    fun `delete namespace rejects default and unknown namespace`() {
+        val default = Namespace(UUID.randomUUID(), "default", "Default", true, now, now, true)
+        `when`(namespaceRepository.findByKey("default")).thenReturn(default)
+        assertThrows(ConflictException::class.java) { service.deleteNamespace("default") }
+        assertThrows(NotFoundException::class.java) { service.deleteNamespace("missing") }
+        verify(namespaceRepository, never()).delete(default)
+        service.deleteNamespace("blue")
+        val blue = Namespace(namespaceId, "blue", "Blue", true, now, now)
+        verify(namespaceRepository).delete(blue)
     }
 
     private fun booleanFeature(version: Long) = Feature(
         id = featureId,
-        tenantId = tenantId,
+        namespaceId = namespaceId,
         key = "checkout.enabled",
         type = FeatureType.BOOLEAN,
         booleanValue = false,
