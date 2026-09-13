@@ -78,12 +78,6 @@ class MainView(
     private val emptyState = Div()
     private var updatingControls = false
 
-    private data class GroupChoice(
-        val key: String?,
-        val label: String,
-        val all: Boolean = false,
-    )
-
     private val allGroups = GroupChoice(null, "All groups", all = true)
     private val globalGroup = GroupChoice(null, "Global")
     private var currentPage = 0

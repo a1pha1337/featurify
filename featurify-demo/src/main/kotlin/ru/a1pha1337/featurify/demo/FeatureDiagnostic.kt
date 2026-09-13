@@ -10,17 +10,3 @@ data class FeatureDiagnostic<T>(
     val cacheAllowed: Boolean,
     val elapsedMicros: Long,
 )
-
-data class ClientDiagnostic(
-    val host: String,
-    val port: Int,
-    val tls: Boolean,
-    val timeout: String,
-    val defaultGroup: String?,
-    val cache: CacheDiagnostic,
-)
-
-data class CacheDiagnostic(
-    val ttl: String,
-    val maximumSize: Long,
-)

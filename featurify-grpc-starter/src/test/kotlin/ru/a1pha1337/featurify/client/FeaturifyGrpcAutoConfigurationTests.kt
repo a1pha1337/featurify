@@ -8,17 +8,13 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.catchThrowableOfType
 import org.junit.jupiter.api.Test
 import org.springframework.boot.autoconfigure.AutoConfigurations
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
 import ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcAutoConfiguration
 import ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties
 import ru.a1pha1337.featurify.client.service.BooleanFeatureService
 import ru.a1pha1337.featurify.client.service.EnumFeatureService
 import ru.a1pha1337.featurify.client.service.VectorFeatureService
 import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse
-import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
 import java.time.Duration
@@ -167,38 +163,5 @@ class FeaturifyGrpcAutoConfigurationTests {
         } finally {
             server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
         }
-    }
-
-    @Configuration(proxyBeanMethods = false)
-    @EnableAutoConfiguration
-    class DiscoveryConfiguration
-
-    @Configuration(proxyBeanMethods = false)
-    class CustomServiceConfiguration {
-        @Bean
-        fun customBooleanService(client: FeaturifyClient) = BooleanFeatureService(client, Duration.ofSeconds(5), 100)
-    }
-
-    @Configuration(proxyBeanMethods = false)
-    class CustomClientConfiguration {
-        @Bean
-        fun customClient(): FeaturifyClient =
-            object : FeaturifyClient {
-                override fun getBooleanFeature(
-                    key: String,
-                    group: String?,
-                ) = BooleanFeatureResponse.newBuilder().setValue(true).build()
-
-                override fun getEnumFeature(
-                    key: String,
-                    group: String?,
-                ) = EnumFeatureResponse.getDefaultInstance()
-
-                override fun getVectorFeature(
-                    key: String,
-                    element: String,
-                    group: String?,
-                ) = BooleanFeatureResponse.getDefaultInstance()
-            }
     }
 }

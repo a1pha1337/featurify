@@ -70,23 +70,3 @@ data class FeatureRecord(
             )
     }
 }
-
-@Table("feature_boolean_value")
-data class BooleanValueRecord(
-    val enabled: Boolean,
-)
-
-@Table("feature_enum_value")
-data class EnumValueRecord(
-    val value: String,
-)
-
-@Table("feature_enum_option")
-data class EnumOptionRecord(
-    val value: String,
-)
-
-@Table("feature_vector_element")
-data class VectorElementRecord(
-    val enabled: Boolean,
-)
