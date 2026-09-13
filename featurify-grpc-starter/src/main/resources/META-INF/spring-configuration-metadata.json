@@ -4,9 +4,32 @@
       "name": "featurify.grpc",
       "type": "ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties",
       "sourceType": "ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties"
+    },
+    {
+      "name": "featurify.grpc.cache",
+      "type": "ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties$Cache",
+      "sourceType": "ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties",
+      "sourceMethod": "getCache()"
     }
   ],
   "properties": [
+    {
+      "name": "featurify.grpc.default-group",
+      "type": "java.lang.String",
+      "description": "Group used by feature service overloads without a group argument. Defaults to null (Global). An explicitly supplied null or empty group always selects Global."
+    },
+    {
+      "name": "featurify.grpc.cache.ttl",
+      "type": "java.time.Duration",
+      "defaultValue": "1s",
+      "description": "Response cache TTL after a successful load in feature services. Zero disables caching; must not be negative."
+    },
+    {
+      "name": "featurify.grpc.cache.maximum-size",
+      "type": "java.lang.Long",
+      "defaultValue": 10000,
+      "description": "Maximum number of cached responses per feature service; must be positive."
+    },
     {
       "name": "featurify.grpc.enabled",
       "type": "java.lang.Boolean",

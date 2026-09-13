@@ -13,10 +13,15 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcAutoConfiguration
+import ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties
+import ru.a1pha1337.featurify.client.service.BooleanFeatureService
+import ru.a1pha1337.featurify.client.service.EnumFeatureService
+import ru.a1pha1337.featurify.client.service.VectorFeatureService
 import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
+import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 class FeaturifyGrpcAutoConfigurationTests {
@@ -27,6 +32,9 @@ class FeaturifyGrpcAutoConfigurationTests {
     fun `starter can be disabled without credentials`() {
         runner.withPropertyValues("featurify.grpc.enabled=false").run {
             assertThat(it).hasNotFailed().doesNotHaveBean(FeaturifyClient::class.java)
+            assertThat(it).doesNotHaveBean(BooleanFeatureService::class.java)
+            assertThat(it).doesNotHaveBean(EnumFeatureService::class.java)
+            assertThat(it).doesNotHaveBean(VectorFeatureService::class.java)
         }
     }
 
@@ -35,7 +43,41 @@ class FeaturifyGrpcAutoConfigurationTests {
         runner.withUserConfiguration(CustomClientConfiguration::class.java).run {
             assertThat(it).hasNotFailed().hasSingleBean(FeaturifyClient::class.java)
             assertThat(it.getBean(FeaturifyClient::class.java).getBooleanFeature("test").value).isTrue()
+            assertThat(it).hasSingleBean(BooleanFeatureService::class.java)
+            assertThat(it).hasSingleBean(EnumFeatureService::class.java)
+            assertThat(it).hasSingleBean(VectorFeatureService::class.java)
+            assertThat(it.getBean(BooleanFeatureService::class.java).isEnabled("test")).isTrue()
+            assertThat(it.getBean(FeaturifyGrpcProperties::class.java).cache.ttl).isEqualTo(Duration.ofSeconds(1))
+            assertThat(it.getBean(FeaturifyGrpcProperties::class.java).cache.maximumSize).isEqualTo(10_000)
         }
+    }
+
+    @Test
+    fun `cache properties bind for a custom client and zero ttl bypasses caching`() {
+        runner
+            .withUserConfiguration(CustomClientConfiguration::class.java)
+            .withPropertyValues("featurify.grpc.cache.ttl=0s", "featurify.grpc.cache.maximum-size=25")
+            .run {
+                assertThat(it).hasNotFailed()
+                val cache = it.getBean(FeaturifyGrpcProperties::class.java).cache
+                assertThat(cache.ttl).isEqualTo(Duration.ZERO)
+                assertThat(cache.maximumSize).isEqualTo(25)
+                val service = it.getBean(BooleanFeatureService::class.java)
+                assertThat(service.getFeature("test")).isNotSameAs(service.getFeature("test"))
+            }
+    }
+
+    @Test
+    fun `custom service overrides only its own default bean`() {
+        runner
+            .withUserConfiguration(CustomClientConfiguration::class.java, CustomServiceConfiguration::class.java)
+            .run {
+                assertThat(it).hasNotFailed().hasSingleBean(BooleanFeatureService::class.java)
+                assertThat(it.getBean(BooleanFeatureService::class.java)).isSameAs(it.getBean("customBooleanService"))
+                assertThat(it)
+                    .hasSingleBean(EnumFeatureService::class.java)
+                    .hasSingleBean(VectorFeatureService::class.java)
+            }
     }
 
     @Test
@@ -51,6 +93,9 @@ class FeaturifyGrpcAutoConfigurationTests {
             "featurify.grpc.timeout=0s",
             "featurify.grpc.timeout=-1s",
             "featurify.grpc.timeout=2d",
+            "featurify.grpc.cache.ttl=-1s",
+            "featurify.grpc.cache.maximum-size=0",
+            "featurify.grpc.cache.maximum-size=-1",
         ).forEach { property ->
             runner.withPropertyValues("featurify.grpc.token=test-token", property).run { assertThat(it).hasFailed() }
         }
@@ -113,6 +158,9 @@ class FeaturifyGrpcAutoConfigurationTests {
                     assertThat(it).hasNotFailed().hasSingleBean(FeaturifyClient::class.java)
                     client = it.getBean(FeaturifyClient::class.java)
                     assertThat(client.getBooleanFeature("enabled").version).isEqualTo(42)
+                    assertThat(
+                        it.getBean(BooleanFeatureService::class.java).getFeature("enabled").version,
+                    ).isEqualTo(42)
                 }
             val error = catchThrowableOfType(StatusRuntimeException::class.java) { client.getBooleanFeature("enabled") }
             assertThat(error.status.code).isEqualTo(Status.Code.UNAVAILABLE)
@@ -124,6 +172,12 @@ class FeaturifyGrpcAutoConfigurationTests {
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
     class DiscoveryConfiguration
+
+    @Configuration(proxyBeanMethods = false)
+    class CustomServiceConfiguration {
+        @Bean
+        fun customBooleanService(client: FeaturifyClient) = BooleanFeatureService(client, Duration.ofSeconds(5), 100)
+    }
 
     @Configuration(proxyBeanMethods = false)
     class CustomClientConfiguration {

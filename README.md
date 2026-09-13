@@ -1,6 +1,7 @@
 # Featurify MVP
 
-Сервис feature toggles с изоляцией конфигурации по namespace'ам. Конфигурация не кэшируется: каждый запрос читает актуальное состояние из PostgreSQL, поэтому REST API можно безопасно масштабировать горизонтально.
+Сервис feature toggles с изоляцией конфигурации по namespace'ам. Конфигурация не кэшируется: каждый запрос читает
+актуальное состояние из PostgreSQL, поэтому REST API можно безопасно масштабировать горизонтально.
 
 Ключи namespace, групп и фич поддерживают `camelCase`, `PascalCase`, `kebab-case` и
 составные имена с точками, например `checkout.payment-provider`.
@@ -26,13 +27,13 @@
 Проект собирается как Gradle multi-project на JDK 25. Сервер использует Spring Boot 4.1.1,
 а три клиентских gRPC-модуля компилируются с `--release 8` и работают начиная с Java 8:
 
-| Модуль | Содержимое |
-|---|---|
-| `featurify-api` | REST DTO request/response, Jakarta Validation и общие enum для сервера |
-| `featurify-service` | Spring Boot приложение: REST, gRPC-сервер, Vaadin UI, безопасность, JDBC и Flyway |
-| `featurify-grpc-api` | `.proto` и сгенерированные Java gRPC/Protobuf классы без Spring, Kotlin и Jakarta Validation |
-| `featurify-grpc-client` | Java-клиент без Spring: авторизация, соединение, TLS, deadline |
-| `featurify-grpc-starter` | Общая автоконфигурация клиента для Spring Boot 2, 3 и 4 |
+| Модуль                   | Содержимое                                                                                   |
+|--------------------------|----------------------------------------------------------------------------------------------|
+| `featurify-api`          | REST DTO request/response, Jakarta Validation и общие enum для сервера                       |
+| `featurify-service`      | Spring Boot приложение: REST, gRPC-сервер, Vaadin UI, безопасность, JDBC и Flyway            |
+| `featurify-grpc-api`     | `.proto` и сгенерированные Java gRPC/Protobuf классы без Spring, Kotlin и Jakarta Validation |
+| `featurify-grpc-client`  | Java-клиент без Spring: авторизация, соединение, TLS, deadline                               |
+| `featurify-grpc-starter` | Общая автоконфигурация клиента для Spring Boot 2, 3 и 4                                      |
 
 Сервис зависит от `featurify-api` и `featurify-grpc-api`.
 Клиентская цепочка: `featurify-grpc-starter` → `featurify-grpc-client` → `featurify-grpc-api`.
@@ -43,7 +44,8 @@
 независимо от версии Spring Boot сервера.
 SQL-миграция находится в `featurify-service/src/main/resources/db/migration`.
 
-В исходной постановке одновременно указаны Liquibase и Flyway. Использован Flyway, потому что требование создать именно Flyway-миграции сформулировано отдельно и конкретно.
+В исходной постановке одновременно указаны Liquibase и Flyway. Использован Flyway, потому что требование создать именно
+Flyway-миграции сформулировано отдельно и конкретно.
 
 ## Локальный запуск всего окружения
 
@@ -112,18 +114,19 @@ docker compose up -d postgres keycloak
 
 Переменные окружения:
 
-| Переменная | Значение по умолчанию |
-|---|---|
-| `DB_URL` | `jdbc:postgresql://localhost:5432/featurify` |
-| `DB_USERNAME` / `DB_PASSWORD` | `featurify` / `featurify` |
-| `KEYCLOAK_BASE_URL` | общий URL Keycloak, по умолчанию `http://localhost:8081` |
-| `KEYCLOAK_PUBLIC_URL` | URL для browser redirect; переопределяет общий URL |
-| `KEYCLOAK_INTERNAL_URL` | URL для server-to-server запросов; переопределяет общий URL |
-| `KEYCLOAK_REALM` | `featurify` |
-| `KEYCLOAK_CLIENT_ID` | `featurify` |
-| `KEYCLOAK_CLIENT_SECRET` | `change-me` |
+| Переменная                    | Значение по умолчанию                                       |
+|-------------------------------|-------------------------------------------------------------|
+| `DB_URL`                      | `jdbc:postgresql://localhost:5432/featurify`                |
+| `DB_USERNAME` / `DB_PASSWORD` | `featurify` / `featurify`                                   |
+| `KEYCLOAK_BASE_URL`           | общий URL Keycloak, по умолчанию `http://localhost:8081`    |
+| `KEYCLOAK_PUBLIC_URL`         | URL для browser redirect; переопределяет общий URL          |
+| `KEYCLOAK_INTERNAL_URL`       | URL для server-to-server запросов; переопределяет общий URL |
+| `KEYCLOAK_REALM`              | `featurify`                                                 |
+| `KEYCLOAK_CLIENT_ID`          | `featurify`                                                 |
+| `KEYCLOAK_CLIENT_SECRET`      | `change-me`                                                 |
 
-В поставляемом compose redirect URI уже настроен. Любой аутентифицированный пользователь имеет административный доступ в рамках MVP. Если изменить `APP_PORT`, нужно также изменить redirect URI и web origin в realm JSON.
+В поставляемом compose redirect URI уже настроен. Любой аутентифицированный пользователь имеет административный доступ в
+рамках MVP. Если изменить `APP_PORT`, нужно также изменить redirect URI и web origin в realm JSON.
 
 ## REST API
 
@@ -143,12 +146,12 @@ Namespace определяется токеном. Параметр `namespace` 
 Keycloak JWT и browser session сами по себе не дают доступа к этим endpoints.
 Правило также действует для HEAD. Токены передаются только в заголовке, не в URL.
 
-| Интерфейс | Авторизация | Область доступа |
-|---|---|---|
-| `AccessTokenController` | Keycloak JWT или OAuth2 login session | Управление токенами |
-| `AdminFeatureController` (включая историю, группы и namespace) | Keycloak JWT или OAuth2 login session | Администрирование |
-| `PublicFeatureController` | Namespace-токен | Только чтение в namespace токена |
-| gRPC `FeatureService` | Namespace-токен в metadata `authorization` | Только чтение в namespace токена |
+| Интерфейс                                                      | Авторизация                                | Область доступа                  |
+|----------------------------------------------------------------|--------------------------------------------|----------------------------------|
+| `AccessTokenController`                                        | Keycloak JWT или OAuth2 login session      | Управление токенами              |
+| `AdminFeatureController` (включая историю, группы и namespace) | Keycloak JWT или OAuth2 login session      | Администрирование                |
+| `PublicFeatureController`                                      | Namespace-токен                            | Только чтение в namespace токена |
+| gRPC `FeatureService`                                          | Namespace-токен в metadata `authorization` | Только чтение в namespace токена |
 
 Namespace-токены не предоставляют административных прав и не сохраняются в HTTP-сессии.
 
@@ -223,18 +226,19 @@ HTTP status совпадает с полем `status`. Успешные отве
 Клиенты должны ориентироваться на HTTP status и `type`/`code`, а не разбирать `detail`.
 Старое поле `message` заменено на `detail`. Ошибки не содержат секретов и stack trace.
 
-| HTTP status | `code` |
-|---|---|
-| 400 | `VALIDATION_ERROR`, `MALFORMED_JSON` |
-| 401 / 403 | `UNAUTHORIZED` / `FORBIDDEN` |
-| 404 / 409 | `NOT_FOUND` / `CONFLICT` |
+| HTTP status     | `code`                                                             |
+|-----------------|--------------------------------------------------------------------|
+| 400             | `VALIDATION_ERROR`, `MALFORMED_JSON`                               |
+| 401 / 403       | `UNAUTHORIZED` / `FORBIDDEN`                                       |
+| 404 / 409       | `NOT_FOUND` / `CONFLICT`                                           |
 | 405 / 406 / 415 | `METHOD_NOT_ALLOWED` / `NOT_ACCEPTABLE` / `UNSUPPORTED_MEDIA_TYPE` |
-| 500 / 503 | `INTERNAL_ERROR` / `SERVICE_UNAVAILABLE` |
+| 500 / 503       | `INTERNAL_ERROR` / `SERVICE_UNAVAILABLE`                           |
 
 Ответы 401 содержат `WWW-Authenticate: Bearer`; ответы с ошибками имеют `Cache-Control: no-store`.
 
 Устаревшая версия возвращает `409 Conflict`; неизвестная или удалённая фича в публичном API — `404 Not Found`.
-Список фич возвращается как Spring Data `Page`: элементы находятся в `content`, рядом передаются метаданные страницы и общее количество элементов.
+Список фич возвращается как Spring Data `Page`: элементы находятся в `content`, рядом передаются метаданные страницы и
+общее количество элементов.
 Номер страницы начинается с нуля, размер страницы по умолчанию равен 20; сортировка по умолчанию выполняется по `key`.
 В административных feature endpoints без `namespace` используется default namespace.
 В read-only endpoints без `namespace` используется namespace предъявленного токена.
@@ -333,14 +337,14 @@ REST-чтение фич и gRPC используют одни namespace-ток�
 Ошибки приложения содержат `google.rpc.ErrorInfo` с `domain: featurify` и стабильным `reason`;
 ошибки валидации дополнительно содержат `google.rpc.BadRequest.field_violations`.
 
-| gRPC code | `ErrorInfo.reason` |
-|---|---|
-| `UNAUTHENTICATED` | `UNAUTHORIZED` |
-| `INVALID_ARGUMENT` | `VALIDATION_ERROR` |
-| `NOT_FOUND` | `NOT_FOUND` |
+| gRPC code             | `ErrorInfo.reason`      |
+|-----------------------|-------------------------|
+| `UNAUTHENTICATED`     | `UNAUTHORIZED`          |
+| `INVALID_ARGUMENT`    | `VALIDATION_ERROR`      |
+| `NOT_FOUND`           | `NOT_FOUND`             |
 | `FAILED_PRECONDITION` | `FEATURE_TYPE_MISMATCH` |
-| `UNAVAILABLE` | `SERVICE_UNAVAILABLE` |
-| `INTERNAL` | `INTERNAL_ERROR` |
+| `UNAVAILABLE`         | `SERVICE_UNAVAILABLE`   |
+| `INTERNAL`            | `INTERNAL_ERROR`        |
 
 Успешные protobuf-ответы остаются `value` и `version`, без обёртки success/error.
 В Java/Kotlin детали извлекаются через `StatusProto.fromThrowable(exception)` и распаковку
@@ -386,14 +390,62 @@ featurify:
 ```
 
 Токен передаётся без префикса `Bearer`; namespace определяется токеном.
-Получите клиент через constructor injection:
+Для клиентского кода стартер предоставляет три сервиса с кешированием ответов:
+
+```kotlin
+import org.springframework.stereotype.Service
+import ru.a1pha1337.featurify.client.service.BooleanFeatureService
+import ru.a1pha1337.featurify.client.service.EnumFeatureService
+import ru.a1pha1337.featurify.client.service.VectorFeatureService
+
+@Service
+class CheckoutFeatures(
+    private val booleans: BooleanFeatureService,
+    private val enums: EnumFeatureService,
+    private val vectors: VectorFeatureService,
+) {
+    fun enabled(): Boolean = booleans.isEnabled("enabled", "checkout")
+    fun provider(): String = enums.getValue("provider", "checkout")
+    fun dogEnabled(): Boolean = vectors.isEnabled("animals", "DOG")
+    fun version(): Long = booleans.getFeature("enabled", "checkout").version
+}
+```
+
+У каждого сервиса есть `getFeature(...)`, возвращающий полный protobuf-ответ с `version`,
+и перегрузки без группы для Java и Kotlin. Они используют `featurify.grpc.default-group`
+(`defaultGroup` в `FeaturifyGrpcProperties`): по умолчанию `null`, то есть Global.
+Например, при `featurify.grpc.default-group: checkout` вызов `booleans.isEnabled("enabled")`
+читает фичу из `checkout`. Это также относится к `enums.getValue(...)`,
+`vectors.isEnabled(...)` и `getFeature(...)` без аргумента группы.
+Явно переданная группа имеет приоритет; явные `null` и `""` выбирают Global.
+Кеш Caffeine хранит успешные ответы, включая
+`false` и пустую строку, по типу фичи, ключу, группе и элементу vector. `null` и пустая
+группа используют одну запись Global. Параллельные запросы одной записи объединяются
+в одну загрузку. Ошибки RPC передаются без изменений и не кешируются.
+
+TTL отсчитывается с получения ответа и не продлевается при чтении; после истечения
+следующий вызов синхронно получает свежий ответ. Настройки через `FeaturifyGrpcProperties`:
+
+```yaml
+featurify:
+  grpc:
+    cache:
+      ttl: 1s
+      maximum-size: 10000
+```
+
+`ttl: 0s` отключает кеширование. Лимит размера применяется отдельно к каждому сервису.
+Сервисы потокобезопасны, кеши локальны для экземпляра сервиса. Caffeine 2.9.3 сохраняет
+поддержку Java 8; используются API, совместимые также с Caffeine 3.x в современных Boot.
+
+Низкоуровневый клиент также доступен через constructor injection:
 
 ```kotlin
 import org.springframework.stereotype.Service
 import ru.a1pha1337.featurify.client.FeaturifyClient
 
 @Service
-class CheckoutFeatures(private val features: FeaturifyClient) {
+class RawCheckoutFeatures(private val features: FeaturifyClient) {
     fun enabled(): Boolean = features.getBooleanFeature("enabled", "checkout").value
 
     fun provider(): String = features.getEnumFeature("provider", "checkout").value
@@ -412,21 +464,27 @@ class CheckoutFeatures(private val features: FeaturifyClient) {
 `StatusProto.fromThrowable(exception)` позволяет прочитать `ErrorInfo` и `BadRequest`.
 Ошибки не подменяются значениями `false` или пустой строкой.
 
-| Свойство | По умолчанию | Назначение |
-|---|---|---|
-| `featurify.grpc.enabled` | `true` | `false` отключает автоконфигурацию |
-| `featurify.grpc.host` | `localhost` | Хост gRPC-сервера |
-| `featurify.grpc.port` | `9090` | Порт gRPC-сервера |
-| `featurify.grpc.token` | обязательное | Namespace-токен без `Bearer` |
-| `featurify.grpc.timeout` | `2s` | Положительный deadline каждого RPC, максимум `1d` |
-| `featurify.grpc.tls` | `true` | TLS с проверкой сертификата и имени сервера |
-| `featurify.grpc.trust-certificate` | системные CA | PEM-ресурс доверенного CA, например `file:/certs/ca.crt` |
+| Свойство                            | По умолчанию | Назначение                                                                   |
+|-------------------------------------|--------------|------------------------------------------------------------------------------|
+| `featurify.grpc.enabled`            | `true`       | `false` отключает автоконфигурацию                                           |
+| `featurify.grpc.host`               | `localhost`  | Хост gRPC-сервера                                                            |
+| `featurify.grpc.port`               | `9090`       | Порт gRPC-сервера                                                            |
+| `featurify.grpc.token`              | обязательное | Namespace-токен без `Bearer`                                                 |
+| `featurify.grpc.default-group`      | `null` (Global) | Группа для вызовов сервисов без аргумента группы                           |
+| `featurify.grpc.timeout`            | `2s`         | Положительный deadline каждого RPC, максимум `1d`                            |
+| `featurify.grpc.cache.ttl`          | `1s`         | TTL ответов в сервисах; `0s` отключает кеш, отрицательные значения запрещены |
+| `featurify.grpc.cache.maximum-size` | `10000`      | Максимум записей в кеше каждого сервиса; положительное число                 |
+| `featurify.grpc.tls`                | `true`       | TLS с проверкой сертификата и имени сервера                                  |
+| `featurify.grpc.trust-certificate`  | системные CA | PEM-ресурс доверенного CA, например `file:/certs/ca.crt`                     |
 
 Для TLS-сервера оставьте `tls: true`; при собственном CA задайте `trust-certificate`.
 Указывать сертификат при `tls: false` запрещено. Отсутствующий токен и неверные настройки
 прерывают запуск приложения. Соединение создаётся лениво: доступность сервера проверяется
 при RPC. При остановке Spring контекста стартер закрывает принадлежащее ему соединение.
-Собственный bean `FeaturifyClient` отключает стандартный клиент и его настройки.
+Собственный bean `FeaturifyClient` заменяет стандартный клиент: транспортные настройки
+для него не проверяются, сервисные бины используют этот клиент и общие настройки кеша.
+Каждый сервис можно заменить своим bean соответствующего типа. `featurify.grpc.enabled=false`
+отключает создание и стандартного клиента, и сервисов.
 Для раннего SB2 регистрация выполняется через `META-INF/spring.factories`, для SB3/SB4 —
 через `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
 Используются обычная `@Configuration` и JavaBean binding, доступные с SB2.0; зависимости
@@ -492,11 +550,11 @@ JDK на Ubuntu для совместимости с бинарниками prot
 `feature` содержит только общие данные: namespace, группу, ключ, тип, описание,
 версию и даты. Значения хранятся отдельно:
 
-| Таблица | Назначение |
-|---|---|
-| `feature_boolean_value` | Единственное boolean-значение фичи |
-| `feature_enum_value` | Единственный выбранный enum-вариант |
-| `feature_enum_option` | Упорядоченные допустимые enum-варианты |
+| Таблица                  | Назначение                                      |
+|--------------------------|-------------------------------------------------|
+| `feature_boolean_value`  | Единственное boolean-значение фичи              |
+| `feature_enum_value`     | Единственный выбранный enum-вариант             |
+| `feature_enum_option`    | Упорядоченные допустимые enum-варианты          |
 | `feature_vector_element` | Имена и независимые состояния элементов вектора |
 
 Составные внешние ключи с автоматически вычисляемым типом запрещают привязывать

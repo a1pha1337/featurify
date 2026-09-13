@@ -1,35 +1,35 @@
 package ru.a1pha1337.featurify.client.autoconfigure;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.core.io.Resource;
 
 import java.time.Duration;
 
-/** JavaBean binding works across Boot 2 and 3, without Kotlin reflection or Jakarta validation. */
+/**
+ * JavaBean binding works across Boot 2, 3 and 4, without Kotlin reflection or Jakarta validation.
+ */
+@Getter
+@Setter
 @ConfigurationProperties("featurify.grpc")
 public class FeaturifyGrpcProperties {
     private boolean enabled = true;
     private String host = "localhost";
     private int port = 9090;
     private String token = "";
+    private String defaultGroup;
     private Duration timeout = Duration.ofSeconds(2);
     private boolean tls = true;
     private Resource trustCertificate;
+    private final Cache cache = new Cache();
 
-    public boolean isEnabled() { return enabled; }
-    public void setEnabled(boolean enabled) { this.enabled = enabled; }
-    public String getHost() { return host; }
-    public void setHost(String host) { this.host = host; }
-    public int getPort() { return port; }
-    public void setPort(int port) { this.port = port; }
-    public String getToken() { return token; }
-    public void setToken(String token) { this.token = token; }
-    public Duration getTimeout() { return timeout; }
-    public void setTimeout(Duration timeout) { this.timeout = timeout; }
-    public boolean isTls() { return tls; }
-    public void setTls(boolean tls) { this.tls = tls; }
-    public Resource getTrustCertificate() { return trustCertificate; }
-    public void setTrustCertificate(Resource trustCertificate) { this.trustCertificate = trustCertificate; }
+    @Getter
+    @Setter
+    public static class Cache {
+        private Duration ttl = Duration.ofSeconds(1);
+        private long maximumSize = 10_000;
+    }
 
     // Deliberately no toString containing credentials.
 }
