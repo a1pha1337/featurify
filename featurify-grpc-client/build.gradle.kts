@@ -1,19 +1,19 @@
 plugins {
     `java-library`
     `maven-publish`
-    kotlin("jvm")
-    id("io.spring.dependency-management")
+    kotlin("jvm") // Kotlin is used only for tests, not in the published library.
 }
 
-java {
-    withSourcesJar()
-}
+java { withSourcesJar() }
 
 dependencies {
-    api(kotlin("stdlib"))
-    api("jakarta.validation:jakarta.validation-api")
-    testImplementation("org.assertj:assertj-core")
+    api(project(":featurify-grpc-api"))
+    implementation("io.grpc:grpc-netty-shaded")
+    testImplementation(kotlin("stdlib"))
+    testImplementation(platform("org.junit:junit-bom:5.14.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.assertj:assertj-core:3.27.7")
+    testImplementation("io.grpc:grpc-inprocess")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

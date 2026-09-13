@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcAutoConfiguration

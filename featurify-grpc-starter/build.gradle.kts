@@ -10,12 +10,13 @@ java {
 }
 
 dependencies {
-    api(project(":featurify-api"))
-    api("org.springframework.boot:spring-boot-starter")
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("io.grpc:grpc-netty-shaded")
+    api(project(":featurify-grpc-client"))
+    // Spring is provided by the host application. Never bring the server's Boot BOM into clients.
+    compileOnly("org.springframework.boot:spring-boot-autoconfigure:2.0.9.RELEASE")
+    testImplementation(kotlin("stdlib"))
+    testImplementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.1"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("io.grpc:grpc-inprocess")
+    testImplementation("io.grpc:grpc-netty-shaded")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

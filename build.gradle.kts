@@ -22,25 +22,49 @@ allprojects {
 }
 
 subprojects {
-    apply(plugin = "org.jetbrains.kotlin.jvm")
-    apply(plugin = "io.spring.dependency-management")
+    apply(plugin = "java")
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
 
-    extensions.configure<DependencyManagementExtension> {
-        imports {
-            mavenBom(SpringBootPlugin.BOM_COORDINATES)
+    plugins.withId("io.spring.dependency-management") {
+        extensions.configure<DependencyManagementExtension> {
+            imports {
+                mavenBom(SpringBootPlugin.BOM_COORDINATES)
+            }
         }
     }
     extensions.configure<JavaPluginExtension> {
         toolchain.languageVersion = JavaLanguageVersion.of(25)
     }
-    extensions.configure<KotlinJvmProjectExtension> {
-        compilerOptions {
-            freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
+    plugins.withId("org.jetbrains.kotlin.jvm") {
+        extensions.configure<KotlinJvmProjectExtension> {
+            compilerOptions {
+                freeCompilerArgs.addAll("-Xjsr305=strict", "-Xannotation-default-target=param-property")
+            }
         }
     }
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
+    }
+
+    if (name.startsWith("featurify-grpc-")) {
+        plugins.withId("maven-publish") {
+            extensions.configure<PublishingExtension> {
+                repositories {
+                    maven {
+                        name = "compatibility"
+                        url = rootProject.layout.buildDirectory.dir("compatibility-repository").get().asFile.toURI()
+                    }
+                }
+            }
+        }
+        tasks.named<JavaCompile>("compileJava") {
+            options.release = 8
+        }
+        plugins.withId("org.jetbrains.kotlin.jvm") {
+            tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileKotlin") {
+                compilerOptions.jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8
+            }
+        }
     }
 }
 
@@ -52,4 +76,17 @@ tasks.named("check") {
 }
 tasks.named("clean") {
     dependsOn(subprojects.map { "${it.path}:clean" })
+}
+
+tasks.register<GradleBuild>("verifyClientCompatibility") {
+    group = "verification"
+    description = "Tests published client jars in independent Boot 2.0, 2.6, 2.7, 3.5 and 4.1 applications. Requires JDK 8, 21 and 25."
+    dependsOn(
+        ":featurify-grpc-api:publishMavenJavaPublicationToCompatibilityRepository",
+        ":featurify-grpc-client:publishMavenJavaPublicationToCompatibilityRepository",
+        ":featurify-grpc-starter:publishMavenJavaPublicationToCompatibilityRepository",
+    )
+    dir = file("compatibility-tests")
+    tasks = listOf("check")
+    startParameter.projectProperties = mapOf("featurifyVersion" to project.version.toString())
 }

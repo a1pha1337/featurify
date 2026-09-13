@@ -23,18 +23,24 @@
 
 ## Модули
 
-Проект собирается как Gradle multi-project на JDK 25 и Spring Boot 4.1.1:
+Проект собирается как Gradle multi-project на JDK 25. Сервер использует Spring Boot 4.1.1,
+а три клиентских gRPC-модуля компилируются с `--release 8` и работают начиная с Java 8:
 
 | Модуль | Содержимое |
 |---|---|
-| `featurify-api` | REST DTO request/response, валидационные аннотации, общие enum, `.proto` и сгенерированные gRPC/Protobuf классы |
+| `featurify-api` | REST DTO request/response, Jakarta Validation и общие enum для сервера |
 | `featurify-service` | Spring Boot приложение: REST, gRPC-сервер, Vaadin UI, безопасность, JDBC и Flyway |
-| `featurify-grpc-starter` | Подключаемая библиотека с Spring Boot автоконфигурацией и gRPC-клиентом |
+| `featurify-grpc-api` | `.proto` и сгенерированные Java gRPC/Protobuf классы без Spring, Kotlin и Jakarta Validation |
+| `featurify-grpc-client` | Java-клиент без Spring: авторизация, соединение, TLS, deadline |
+| `featurify-grpc-starter` | Общая автоконфигурация клиента для Spring Boot 2, 3 и 4 |
 
-Сервис и стартер зависят от `featurify-api`; стартер не зависит от сервиса.
-API и стартер собираются в обычные JAR с публикацией Maven и исходниками.
-API не подключает Spring Boot, Vaadin или JDBC. Пакеты существующих DTO и enum
-сохранены, protobuf-классы генерируются только в API-модуле.
+Сервис зависит от `featurify-api` и `featurify-grpc-api`.
+Клиентская цепочка: `featurify-grpc-starter` → `featurify-grpc-client` → `featurify-grpc-api`.
+Клиенты не подключают сервер, REST DTO, Jakarta Validation, Kotlin runtime, Vaadin или JDBC.
+Библиотеки собираются в обычные JAR с публикацией Maven и исходниками.
+Пакеты существующих DTO и protobuf-классов сохранены; protobuf-классы генерируются
+только в `featurify-grpc-api`. Версии gRPC и Protobuf определяются в `gradle.properties`,
+независимо от версии Spring Boot сервера.
 SQL-миграция находится в `featurify-service/src/main/resources/db/migration`.
 
 В исходной постановке одновременно указаны Liquibase и Flyway. Использован Flyway, потому что требование создать именно Flyway-миграции сформулировано отдельно и конкретно.
@@ -264,13 +270,14 @@ UUID используется для поиска записи; проверяе
 Хешируется 43-символьный секрет, что укладывается в ограничение bcrypt в 72 байта.
 Таблица токенов добавлена в V1; для уже применённой V1 потребуется новая БД.
 
-Контракт: `featurify-api/src/main/proto/feature_service.proto`. gRPC слушает порт `9090`.
+Контракт: `featurify-grpc-api/src/main/proto/feature_service.proto`. gRPC слушает порт `9090`.
 
 Сервер запускает официальный `org.springframework.boot:spring-boot-starter-grpc-server`.
 Spring регистрирует `FeatureGrpcService` через `@GrpcService` и подключает к нему
 `TokenAuthenticationInterceptor`. Жизненным циклом сервера управляет Spring; время
 graceful shutdown — 5 секунд, максимальный размер входящего сообщения — 16 КБ.
-Версии gRPC, Protobuf и генераторов кода согласованы dependency management Spring Boot.
+Версии gRPC, Protobuf и генераторов кода согласованы с сервером; клиентские зависимости
+публикуются отдельно от dependency management Spring Boot.
 Автоматическая OAuth2-авторизация gRPC отключена: Keycloak используется только для HTTP,
 а gRPC продолжает проверять namespace-токены в PostgreSQL.
 
@@ -294,7 +301,7 @@ BOOLEAN и ENUM методы принимают `{"group":"checkout","key":"enab
 Пример локального вызова через grpcurl (контракт передаётся явно, reflection не включён):
 
 ```shell
-grpcurl -plaintext -import-path featurify-api/src/main/proto -proto feature_service.proto \
+grpcurl -plaintext -import-path featurify-grpc-api/src/main/proto -proto feature_service.proto \
   -H "authorization: Bearer $FEATURE_TOKEN" \
   -d '{"group":"checkout","key":"enabled"}' \
   localhost:9090 featurify.v1.FeatureService/GetBooleanFeature
@@ -344,13 +351,14 @@ REST-чтение фич и gRPC используют одни namespace-ток�
 
 ### Подключение клиентского стартера
 
-Опубликуйте обе библиотеки в локальный Maven-репозиторий:
+Опубликуйте три клиентские библиотеки в локальный Maven-репозиторий:
 
 ```shell
-./gradlew :featurify-api:publishToMavenLocal :featurify-grpc-starter:publishToMavenLocal
+./gradlew :featurify-grpc-api:publishToMavenLocal :featurify-grpc-client:publishToMavenLocal :featurify-grpc-starter:publishToMavenLocal
 ```
 
-В клиентском Spring Boot 4.1 приложении на JDK 25 добавьте зависимость:
+В существующем Spring Boot приложении добавьте зависимость. Для SB2 и SB3 используется
+один и тот же артефакт; зависимости Spring Boot предоставляет само приложение:
 
 ```kotlin
 repositories {
@@ -363,8 +371,9 @@ dependencies {
 }
 ```
 
-`featurify-api` подключается транзитивно; генерировать protobuf-классы в приложении
-не нужно. Для локального сервера из Compose настройте `application.yaml`:
+`featurify-grpc-client` и `featurify-grpc-api` подключаются транзитивно; генерировать
+protobuf-классы в приложении не нужно. Стартер не приносит Spring Boot 4 и не обновляет
+версию Spring в приложении. Для локального сервера из Compose настройте `application.yaml`:
 
 ```yaml
 featurify:
@@ -394,8 +403,8 @@ class CheckoutFeatures(private val features: FeaturifyClient) {
 ```
 
 Все ответы также содержат `version`. Необязательная `group` (`null` или пустая строка)
-означает Global. В Java передавайте аргумент группы явно, например
-`features.getBooleanFeature("enabled", null).getValue()`.
+означает Global. В Java также доступны перегрузки без группы, например
+`features.getBooleanFeature("enabled").getValue()`.
 
 Клиент синхронный и потокобезопасный, использует одно соединение, не кэширует значения
 и не включает автоматические повторы. Каждый вызов получает новый deadline.
@@ -418,9 +427,31 @@ class CheckoutFeatures(private val features: FeaturifyClient) {
 прерывают запуск приложения. Соединение создаётся лениво: доступность сервера проверяется
 при RPC. При остановке Spring контекста стартер закрывает принадлежащее ему соединение.
 Собственный bean `FeaturifyClient` отключает стандартный клиент и его настройки.
-Регистрация выполняется через стандартный механизм
-[Spring Boot AutoConfiguration.imports](https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html),
-расширять component scan приложения не требуется.
+Для раннего SB2 регистрация выполняется через `META-INF/spring.factories`, для SB3/SB4 —
+через `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
+Используются обычная `@Configuration` и JavaBean binding, доступные с SB2.0; зависимости
+от `@AutoConfiguration`, Kotlin reflection, `javax.validation` или `jakarta.validation` нет.
+SB2.7 поддерживает оба файла и убирает повторные записи — см.
+[официальное руководство Spring](https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-3.0-Migration-Guide#auto-configuration-files).
+Расширять component scan приложения не требуется.
+
+Автоматическая проверка совместимости использует опубликованные Maven JAR в отдельных
+приложениях с SB2.0.9, SB2.6.15, SB2.7.18, SB3.5.16 и SB4.1.1. SB2 запускается на Java 8,
+SB3 — на Java 21, SB4 — на Java 25. Это проверенные комбинации; конкретные другие версии
+приложения можно добавить в `compatibility-tests/build.gradle.kts`.
+
+Стартер использует gRPC `1.83.1` и Protobuf `4.35.1`. Если приложение уже переопределяет
+эти библиотеки своим BOM или dependency management, согласуйте версии с клиентом:
+понижение Protobuf ниже версии генератора может приводить к ошибке при загрузке классов.
+
+Для приложения без Spring подключайте только `featurify-grpc-client` и закрывайте его:
+
+```java
+try (GrpcFeaturifyClient client = GrpcFeaturifyClient.connect(
+        "localhost", 9090, token, Duration.ofSeconds(2), false, null)) {
+    boolean enabled = client.getBooleanFeature("enabled").getValue();
+}
+```
 
 Сборка генерирует Java gRPC/Protobuf классы из `.proto`. Build-стадия Docker использует
 JDK на Ubuntu для совместимости с бинарниками protoc; runtime остаётся на Alpine.
@@ -433,9 +464,20 @@ JDK на Ubuntu для совместимости с бинарниками prot
 ```
 
 Тесты проверяют UI, административный REST, gRPC-вызовы, bcrypt и изоляцию namespace.
-Тесты API и стартера входят в общий `test`; стартер отдельно проверяет metadata,
+Тесты API, клиента и стартера входят в общий `test`; клиентские тесты проверяют metadata,
 все типы RPC, ошибки, deadline, автоконфигурацию, plaintext/TLS и закрытие соединения
-без PostgreSQL. `./gradlew build` собирает и проверяет все три модуля.
+без PostgreSQL. `./gradlew build` собирает и проверяет все пять модулей.
+Проверка совместимости с разными Spring Boot запускается отдельно:
+
+```shell
+./gradlew verifyClientCompatibility
+```
+
+Требуются установленные JDK 8, 21 и 25, обнаруживаемые Gradle toolchains.
+Задача публикует клиентские JAR в `build/compatibility-repository` и проверяет их
+как внешние зависимости без доступа к серверному classpath. Проверяются оба механизма
+регистрации, отсутствие лишних зависимостей, binding, отключение/переопределение клиента,
+валидация конфигурации, все три RPC с токеном, TLS, deadline и закрытие соединения.
 Для интеграционной проверки с PostgreSQL включите `FEATURIFY_DB_TESTS=true` и запустите
 `./gradlew test`. Используйте отдельную тестовую БД через `DB_URL` / `DB_USERNAME` /
 `DB_PASSWORD`: Flyway применяет V1 автоматически, а тестовые данные откатываются.

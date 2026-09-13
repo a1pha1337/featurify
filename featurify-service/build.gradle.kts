@@ -1,13 +1,16 @@
 plugins {
     kotlin("jvm")
     kotlin("plugin.spring")
+    id("io.spring.dependency-management")
     id("org.springframework.boot")
     id("com.vaadin")
 }
 
 extra["vaadinVersion"] = "25.2.6"
 dependencies {
+    implementation(kotlin("stdlib"))
     implementation(project(":featurify-api"))
+    implementation(project(":featurify-grpc-api"))
     implementation("org.springframework.boot:spring-boot-starter-grpc-server") {
         exclude(group = "io.grpc", module = "grpc-netty")
     }
