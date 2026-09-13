@@ -260,11 +260,7 @@ class MainView(
                     isSpacing = false
                 }
             vectorValues(feature).forEach { (name, _) ->
-                val toggle =
-                    Button().apply {
-                        element.setAttribute("role", "switch")
-                        element.setAttribute("aria-label", "Toggle ${featureName(feature)} element $name")
-                    }
+                val toggle = featureSwitch("Toggle ${featureName(feature)} element $name")
 
                 fun render() {
                     val enabled = vectorValues(current).getValue(name)
@@ -290,13 +286,7 @@ class MainView(
             return elements
         }
         if (feature.type == FeatureType.BOOLEAN) {
-            val toggle =
-                Button().apply {
-                    addClassName("feature-switch")
-                    icon = Span(Span().apply { addClassName("switch-thumb") }).apply { addClassName("switch-track") }
-                    element.setAttribute("role", "switch")
-                    element.setAttribute("aria-label", "Toggle ${featureName(feature)}")
-                }
+            val toggle = featureSwitch("Toggle ${featureName(feature)}")
 
             fun render() {
                 toggle.text = if (current.value == true) "Enabled" else "Disabled"
@@ -346,6 +336,14 @@ class MainView(
             }
         }
     }
+
+    private fun featureSwitch(ariaLabel: String): Button =
+        Button().apply {
+            addClassName("feature-switch")
+            icon = Span(Span().apply { addClassName("switch-thumb") }).apply { addClassName("switch-track") }
+            element.setAttribute("role", "switch")
+            element.setAttribute("aria-label", ariaLabel)
+        }
 
     @Suppress("UNCHECKED_CAST")
     private fun vectorValues(feature: AdminFeatureResponse): Map<String, Boolean> =
