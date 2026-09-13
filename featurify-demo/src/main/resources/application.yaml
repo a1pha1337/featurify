@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: featurify-demo
+
+server:
+  address: ${DEMO_ADDRESS:127.0.0.1}
+  port: ${DEMO_PORT:8082}
+  shutdown: graceful
+
+featurify:
+  grpc:
+    token: ${FEATURE_TOKEN:}
+    # Local Featurify uses plaintext. Set FEATURIFY_GRPC_TLS=true for a TLS server.
+    tls: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+spring.mvc.problemdetails.enabled: true

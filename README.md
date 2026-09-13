@@ -34,6 +34,7 @@
 | `featurify-grpc-api`     | `.proto` и сгенерированные Java gRPC/Protobuf классы без Spring, Kotlin и Jakarta Validation |
 | `featurify-grpc-client`  | Java-клиент без Spring: авторизация, соединение, TLS, deadline                               |
 | `featurify-grpc-starter` | Общая автоконфигурация клиента для Spring Boot 2, 3 и 4                                      |
+| `featurify-demo`         | Demo-приложение на Spring Boot 4: HTTP-диагностика gRPC-клиента, кеша и групп                 |
 
 Сервис зависит от `featurify-api` и `featurify-grpc-api`.
 Клиентская цепочка: `featurify-grpc-starter` → `featurify-grpc-client` → `featurify-grpc-api`.
@@ -43,6 +44,10 @@
 только в `featurify-grpc-api`. Версии gRPC и Protobuf определяются в `gradle.properties`,
 независимо от версии Spring Boot сервера.
 SQL-миграция находится в `featurify-service/src/main/resources/db/migration`.
+
+Для проверки клиента через HTTP запустите [featurify-demo](featurify-demo/README.md).
+Demo слушает `127.0.0.1:8082`, поддерживает чтение boolean/enum/vector с кешем или напрямую
+и запускается через `:featurify-demo:bootRun` либо Compose-профиль `demo`.
 
 В исходной постановке одновременно указаны Liquibase и Flyway. Использован Flyway, потому что требование создать именно
 Flyway-миграции сформулировано отдельно и конкретно.

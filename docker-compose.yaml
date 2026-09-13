@@ -82,5 +82,28 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  demo:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: featurify-demo/Dockerfile
+    image: featurify-demo:local
+    environment:
+      DEMO_ADDRESS: 0.0.0.0
+      FEATURE_TOKEN: ${FEATURE_TOKEN:-}
+      FEATURIFY_GRPC_HOST: app
+      FEATURIFY_GRPC_PORT: 9090
+      FEATURIFY_GRPC_DEFAULT_GROUP: ${FEATURIFY_GRPC_DEFAULT_GROUP:-}
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-8082}:8082"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8082/actuator/health | grep -q UP"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   postgres-data:
