@@ -1,4 +1,14 @@
 .gradle
+.gradle-home
+.gradle-local
+.git
+.kotlin
 .idea
 build
+**/build
+**/.gradle
+**/.kotlin
+**/node_modules
+**/src/main/frontend/generated
+**/src/main/frontend/index.html
 *.iml
