@@ -1,6 +1,6 @@
 node_modules
-src/main/frontend/generated/
-src/main/frontend/index.html
+**/src/main/frontend/generated/
+**/src/main/frontend/index.html
 target/
 package.json
 package-lock.json
@@ -10,6 +10,7 @@ tsconfig.json
 HELP.md
 .gradle
 .gradle-home/
+.gradle-local/
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/

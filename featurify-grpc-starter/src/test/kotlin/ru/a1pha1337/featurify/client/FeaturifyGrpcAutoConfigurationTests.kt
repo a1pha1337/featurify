@@ -1,0 +1,150 @@
+package ru.a1pha1337.featurify.client
+
+import io.grpc.Status
+import io.grpc.StatusRuntimeException
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
+import io.grpc.stub.StreamObserver
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.catchThrowableOfType
+import org.junit.jupiter.api.Test
+import org.springframework.boot.autoconfigure.AutoConfigurations
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration
+import org.springframework.boot.test.context.runner.ApplicationContextRunner
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcAutoConfiguration
+import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse
+import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
+import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
+import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
+import java.util.concurrent.TimeUnit
+
+class FeaturifyGrpcAutoConfigurationTests {
+    private val runner =
+        ApplicationContextRunner().withConfiguration(AutoConfigurations.of(FeaturifyGrpcAutoConfiguration::class.java))
+
+    @Test
+    fun `starter can be disabled without credentials`() {
+        runner.withPropertyValues("featurify.grpc.enabled=false").run {
+            assertThat(it).hasNotFailed().doesNotHaveBean(FeaturifyClient::class.java)
+        }
+    }
+
+    @Test
+    fun `user client overrides auto configuration without credentials`() {
+        runner.withUserConfiguration(CustomClientConfiguration::class.java).run {
+            assertThat(it).hasNotFailed().hasSingleBean(FeaturifyClient::class.java)
+            assertThat(it.getBean(FeaturifyClient::class.java).getBooleanFeature("test").value).isTrue()
+        }
+    }
+
+    @Test
+    fun `missing token fails startup`() {
+        runner.run { assertThat(it).hasFailed() }
+    }
+
+    @Test
+    fun `invalid configuration fails startup`() {
+        listOf(
+            "featurify.grpc.port=0",
+            "featurify.grpc.host=",
+            "featurify.grpc.timeout=0s",
+            "featurify.grpc.timeout=-1s",
+            "featurify.grpc.timeout=2d",
+        ).forEach { property ->
+            runner.withPropertyValues("featurify.grpc.token=test-token", property).run { assertThat(it).hasFailed() }
+        }
+        runner
+            .withPropertyValues(
+                "featurify.grpc.token=test-token",
+                "featurify.grpc.tls=false",
+                "featurify.grpc.trust-certificate=classpath:grpc-tls/server.crt",
+            ).run { assertThat(it).hasFailed() }
+    }
+
+    @Test
+    fun `auto configuration is discovered from the starter jar and closes plaintext connection`() {
+        verifyConnection(tls = false)
+    }
+
+    @Test
+    fun `TLS is enabled by default and supports a custom trust certificate`() {
+        verifyConnection(tls = true)
+    }
+
+    private fun verifyConnection(tls: Boolean) {
+        val builder =
+            NettyServerBuilder.forPort(0).addService(
+                object : FeatureServiceGrpc.FeatureServiceImplBase() {
+                    override fun getBooleanFeature(
+                        request: GetFeatureRequest,
+                        observer: StreamObserver<BooleanFeatureResponse>,
+                    ) {
+                        observer.onNext(
+                            BooleanFeatureResponse
+                                .newBuilder()
+                                .setValue(true)
+                                .setVersion(42)
+                                .build(),
+                        )
+                        observer.onCompleted()
+                    }
+                },
+            )
+        if (tls) {
+            javaClass.getResourceAsStream("/grpc-tls/server.crt")!!.use { cert ->
+                javaClass.getResourceAsStream("/grpc-tls/server.key")!!.use { key ->
+                    builder.useTransportSecurity(cert, key)
+                }
+            }
+        }
+        val server = builder.build().start()
+        try {
+            lateinit var client: FeaturifyClient
+            ApplicationContextRunner()
+                .withUserConfiguration(DiscoveryConfiguration::class.java)
+                .withPropertyValues(
+                    "featurify.grpc.host=localhost",
+                    "featurify.grpc.port=${server.port}",
+                    "featurify.grpc.token=test-token",
+                    "featurify.grpc.timeout=5s",
+                    if (tls) "featurify.grpc.trust-certificate=classpath:grpc-tls/server.crt" else "featurify.grpc.tls=false",
+                ).run {
+                    assertThat(it).hasNotFailed().hasSingleBean(FeaturifyClient::class.java)
+                    client = it.getBean(FeaturifyClient::class.java)
+                    assertThat(client.getBooleanFeature("enabled").version).isEqualTo(42)
+                }
+            val error = catchThrowableOfType(StatusRuntimeException::class.java) { client.getBooleanFeature("enabled") }
+            assertThat(error.status.code).isEqualTo(Status.Code.UNAVAILABLE)
+        } finally {
+            server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS)
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableAutoConfiguration
+    class DiscoveryConfiguration
+
+    @Configuration(proxyBeanMethods = false)
+    class CustomClientConfiguration {
+        @Bean
+        fun customClient(): FeaturifyClient =
+            object : FeaturifyClient {
+                override fun getBooleanFeature(
+                    key: String,
+                    group: String?,
+                ) = BooleanFeatureResponse.newBuilder().setValue(true).build()
+
+                override fun getEnumFeature(
+                    key: String,
+                    group: String?,
+                ) = EnumFeatureResponse.getDefaultInstance()
+
+                override fun getVectorFeature(
+                    key: String,
+                    element: String,
+                    group: String?,
+                ) = BooleanFeatureResponse.getDefaultInstance()
+            }
+    }
+}

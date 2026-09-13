@@ -1,0 +1,51 @@
+{
+  "groups": [
+    {
+      "name": "featurify.grpc",
+      "type": "ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties",
+      "sourceType": "ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties"
+    }
+  ],
+  "properties": [
+    {
+      "name": "featurify.grpc.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Whether to create the Featurify gRPC client."
+    },
+    {
+      "name": "featurify.grpc.host",
+      "type": "java.lang.String",
+      "defaultValue": "localhost",
+      "description": "Featurify gRPC server hostname."
+    },
+    {
+      "name": "featurify.grpc.port",
+      "type": "java.lang.Integer",
+      "defaultValue": 9090,
+      "description": "Featurify gRPC server port (1-65535)."
+    },
+    {
+      "name": "featurify.grpc.token",
+      "type": "java.lang.String",
+      "description": "Required namespace access token, without the Bearer prefix."
+    },
+    {
+      "name": "featurify.grpc.timeout",
+      "type": "java.time.Duration",
+      "defaultValue": "2s",
+      "description": "Deadline applied independently to each RPC; positive and at most one day."
+    },
+    {
+      "name": "featurify.grpc.tls",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Use TLS with server certificate and hostname verification."
+    },
+    {
+      "name": "featurify.grpc.trust-certificate",
+      "type": "org.springframework.core.io.Resource",
+      "description": "Optional PEM trust certificate resource (file: or classpath:). Requires TLS; otherwise system trust roots are used."
+    }
+  ]
+}

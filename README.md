@@ -21,6 +21,22 @@
 - Flyway-схема с уникальностями, check constraints и DB-триггером неизменяемости типа;
 - health probes и graceful shutdown.
 
+## Модули
+
+Проект собирается как Gradle multi-project на JDK 25 и Spring Boot 4.1.1:
+
+| Модуль | Содержимое |
+|---|---|
+| `featurify-api` | REST DTO request/response, валидационные аннотации, общие enum, `.proto` и сгенерированные gRPC/Protobuf классы |
+| `featurify-service` | Spring Boot приложение: REST, gRPC-сервер, Vaadin UI, безопасность, JDBC и Flyway |
+| `featurify-grpc-starter` | Подключаемая библиотека с Spring Boot автоконфигурацией и gRPC-клиентом |
+
+Сервис и стартер зависят от `featurify-api`; стартер не зависит от сервиса.
+API и стартер собираются в обычные JAR с публикацией Maven и исходниками.
+API не подключает Spring Boot, Vaadin или JDBC. Пакеты существующих DTO и enum
+сохранены, protobuf-классы генерируются только в API-модуле.
+SQL-миграция находится в `featurify-service/src/main/resources/db/migration`.
+
 В исходной постановке одновременно указаны Liquibase и Flyway. Использован Flyway, потому что требование создать именно Flyway-миграции сформулировано отдельно и конкретно.
 
 ## Локальный запуск всего окружения
@@ -85,7 +101,7 @@ Realm `featurify`, confidential client и локальный пользоват�
 
 ```shell
 docker compose up -d postgres keycloak
-./gradlew bootRun
+./gradlew :featurify-service:bootRun
 ```
 
 Переменные окружения:
@@ -248,7 +264,7 @@ UUID используется для поиска записи; проверяе
 Хешируется 43-символьный секрет, что укладывается в ограничение bcrypt в 72 байта.
 Таблица токенов добавлена в V1; для уже применённой V1 потребуется новая БД.
 
-Контракт: `src/main/proto/feature_service.proto`. gRPC слушает порт `9090`.
+Контракт: `featurify-api/src/main/proto/feature_service.proto`. gRPC слушает порт `9090`.
 
 Сервер запускает официальный `org.springframework.boot:spring-boot-starter-grpc-server`.
 Spring регистрирует `FeatureGrpcService` через `@GrpcService` и подключает к нему
@@ -264,7 +280,7 @@ featurify.v1.FeatureService/GetEnumFeature
 featurify.v1.FeatureService/GetVectorFeature
 ```
 
-Оба метода принимают `{"group":"checkout","key":"enabled"}`. `group` — ключ группы,
+BOOLEAN и ENUM методы принимают `{"group":"checkout","key":"enabled"}`. `group` — ключ группы,
 не display name; пустая или пропущенная группа означает `Global`. Namespace в запросе
 отсутствует и определяется только токеном. Ответ содержит типизированное `value`
 (`bool` или `string`) и `version`.
@@ -278,7 +294,7 @@ featurify.v1.FeatureService/GetVectorFeature
 Пример локального вызова через grpcurl (контракт передаётся явно, reflection не включён):
 
 ```shell
-grpcurl -plaintext -import-path src/main/proto -proto feature_service.proto \
+grpcurl -plaintext -import-path featurify-api/src/main/proto -proto feature_service.proto \
   -H "authorization: Bearer $FEATURE_TOKEN" \
   -d '{"group":"checkout","key":"enabled"}' \
   localhost:9090 featurify.v1.FeatureService/GetBooleanFeature
@@ -303,7 +319,7 @@ TLS на gRPC-сервере либо на доверенном прокси, а
 REST-чтение фич и gRPC используют одни namespace-токены. Административный REST API
 продолжает использовать Keycloak.
 
-### Ошибки gRPC и будущий клиентский стартер
+### Ошибки gRPC
 
 Для gRPC применяется [стандартная расширенная модель ошибок](https://grpc.io/docs/guides/error/):
 код gRPC в trailers и `google.rpc.Status` в `grpc-status-details-bin`.
@@ -326,9 +342,85 @@ REST-чтение фич и gRPC используют одни namespace-ток�
 уметь обрабатывать один стандартный status code. Наличие `UNAVAILABLE` не предписывает
 безусловные повторы: deadline и политику повторов определяет клиент.
 
-Клиентский стартер запланирован на следующую итерацию и пока не реализован. Для него
-зафиксированы metadata `authorization: Bearer <token>`, текущий `.proto` и этот контракт
-ошибок; namespace в запросы gRPC передавать не требуется.
+### Подключение клиентского стартера
+
+Опубликуйте обе библиотеки в локальный Maven-репозиторий:
+
+```shell
+./gradlew :featurify-api:publishToMavenLocal :featurify-grpc-starter:publishToMavenLocal
+```
+
+В клиентском Spring Boot 4.1 приложении на JDK 25 добавьте зависимость:
+
+```kotlin
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    implementation("ru.a1pha1337:featurify-grpc-starter:0.0.1-SNAPSHOT")
+}
+```
+
+`featurify-api` подключается транзитивно; генерировать protobuf-классы в приложении
+не нужно. Для локального сервера из Compose настройте `application.yaml`:
+
+```yaml
+featurify:
+  grpc:
+    host: localhost
+    port: 9090
+    token: ${FEATURE_TOKEN}
+    timeout: 2s
+    tls: false
+```
+
+Токен передаётся без префикса `Bearer`; namespace определяется токеном.
+Получите клиент через constructor injection:
+
+```kotlin
+import org.springframework.stereotype.Service
+import ru.a1pha1337.featurify.client.FeaturifyClient
+
+@Service
+class CheckoutFeatures(private val features: FeaturifyClient) {
+    fun enabled(): Boolean = features.getBooleanFeature("enabled", "checkout").value
+
+    fun provider(): String = features.getEnumFeature("provider", "checkout").value
+
+    fun dogEnabled(): Boolean = features.getVectorFeature("animals", "DOG").value
+}
+```
+
+Все ответы также содержат `version`. Необязательная `group` (`null` или пустая строка)
+означает Global. В Java передавайте аргумент группы явно, например
+`features.getBooleanFeature("enabled", null).getValue()`.
+
+Клиент синхронный и потокобезопасный, использует одно соединение, не кэширует значения
+и не включает автоматические повторы. Каждый вызов получает новый deadline.
+Ошибки передаются как `StatusRuntimeException` со статусом и исходными trailers:
+`StatusProto.fromThrowable(exception)` позволяет прочитать `ErrorInfo` и `BadRequest`.
+Ошибки не подменяются значениями `false` или пустой строкой.
+
+| Свойство | По умолчанию | Назначение |
+|---|---|---|
+| `featurify.grpc.enabled` | `true` | `false` отключает автоконфигурацию |
+| `featurify.grpc.host` | `localhost` | Хост gRPC-сервера |
+| `featurify.grpc.port` | `9090` | Порт gRPC-сервера |
+| `featurify.grpc.token` | обязательное | Namespace-токен без `Bearer` |
+| `featurify.grpc.timeout` | `2s` | Положительный deadline каждого RPC, максимум `1d` |
+| `featurify.grpc.tls` | `true` | TLS с проверкой сертификата и имени сервера |
+| `featurify.grpc.trust-certificate` | системные CA | PEM-ресурс доверенного CA, например `file:/certs/ca.crt` |
+
+Для TLS-сервера оставьте `tls: true`; при собственном CA задайте `trust-certificate`.
+Указывать сертификат при `tls: false` запрещено. Отсутствующий токен и неверные настройки
+прерывают запуск приложения. Соединение создаётся лениво: доступность сервера проверяется
+при RPC. При остановке Spring контекста стартер закрывает принадлежащее ему соединение.
+Собственный bean `FeaturifyClient` отключает стандартный клиент и его настройки.
+Регистрация выполняется через стандартный механизм
+[Spring Boot AutoConfiguration.imports](https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html),
+расширять component scan приложения не требуется.
 
 Сборка генерирует Java gRPC/Protobuf классы из `.proto`. Build-стадия Docker использует
 JDK на Ubuntu для совместимости с бинарниками protoc; runtime остаётся на Alpine.
@@ -337,10 +429,13 @@ JDK на Ubuntu для совместимости с бинарниками prot
 
 ```shell
 ./gradlew test
-./gradlew bootJar
+./gradlew :featurify-service:bootJar
 ```
 
 Тесты проверяют UI, административный REST, gRPC-вызовы, bcrypt и изоляцию namespace.
+Тесты API и стартера входят в общий `test`; стартер отдельно проверяет metadata,
+все типы RPC, ошибки, deadline, автоконфигурацию, plaintext/TLS и закрытие соединения
+без PostgreSQL. `./gradlew build` собирает и проверяет все три модуля.
 Для интеграционной проверки с PostgreSQL включите `FEATURIFY_DB_TESTS=true` и запустите
 `./gradlew test`. Используйте отдельную тестовую БД через `DB_URL` / `DB_USERNAME` /
 `DB_PASSWORD`: Flyway применяет V1 автоматически, а тестовые данные откатываются.
