@@ -16,7 +16,7 @@ docker compose -f docker-compose.k8s.yaml up --build -d --wait --wait-timeout 12
 | http://localhost:18080 | Featurify UI и REST | `featurify` / `featurify` |
 | http://localhost:18081 | Keycloak Admin Console | `admin` / `admin` |
 | localhost:19090 | gRPC | Namespace-токен, созданный в UI |
-| https://127.0.0.1:16443 | Kubernetes API | `.local/k8s/kubeconfig` |
+| https://0.0.0.0:16443 | Kubernetes API | `.local/k8s/kubeconfig` |
 
 Порты отличаются от обычного `docker-compose.yaml`, поэтому стенды можно запускать
 одновременно. При необходимости задайте `LOCAL_APP_PORT`, `LOCAL_KEYCLOAK_PORT`,

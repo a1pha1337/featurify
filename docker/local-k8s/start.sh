@@ -36,10 +36,14 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "Building Featurify and operator from the mounted checkout..."
-docker build --target service -t featurify:kind-local -f "$source/Applications.Dockerfile" /workspace
-docker build --target operator -t featurify-k8s-operator:0.0.1-SNAPSHOT -f "$source/Applications.Dockerfile" /workspace
+# Disable BuildKit attestations: kind imports the image into containerd and
+# older containerd snapshots may not contain the provenance digest.
+docker build --provenance=false --target service -t featurify:kind-local -f "$source/Applications.Dockerfile" /workspace
+docker build --provenance=false --target operator -t featurify-k8s-operator:0.0.1-SNAPSHOT -f "$source/Applications.Dockerfile" /workspace
+# Pull single-platform images. A multi-arch manifest can reference platform
+# digests that are not present in the DinD content store used by kind.
 for image in postgres:17-alpine quay.io/keycloak/keycloak:26.7.3; do
-    docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
+    docker pull --platform=linux/amd64 "$image"
 done
 
 if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
@@ -50,12 +54,26 @@ else
 fi
 kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG"
 # The DinD daemon is local to this container; the outer published port is for the host.
-kubectl config set-cluster "kind-$cluster" --server=https://127.0.0.1:6443 >/dev/null
+# kind issued the API certificate for the configured 0.0.0.0 address. Keep
+# that address in the in-container kubeconfig so TLS verification succeeds.
+kubectl config set-cluster "kind-$cluster" --server=https://0.0.0.0:6443 >/dev/null
 kubectl wait --for=condition=Ready nodes --all --timeout=120s
-kubectl config view --raw --flatten | sed "s#https://127.0.0.1:6443#https://127.0.0.1:${LOCAL_KUBE_PORT}#" > /state/kubeconfig
+kubectl config view --raw --flatten | sed "s#https://0.0.0.0:6443#https://0.0.0.0:${LOCAL_KUBE_PORT}#" > /state/kubeconfig
 chmod 600 /state/kubeconfig
-kind load docker-image --name "$cluster" featurify:kind-local featurify-k8s-operator:0.0.1-SNAPSHOT \
-    postgres:17-alpine quay.io/keycloak/keycloak:26.7.3
+# Import directly into the node's containerd and select one platform. The
+# kind helper uses `--all-platforms`, which fails for some registry manifests
+# in a nested Docker daemon when one referenced digest is absent locally.
+for image in featurify:kind-local featurify-k8s-operator:0.0.1-SNAPSHOT \
+    postgres:17-alpine quay.io/keycloak/keycloak:26.7.3; do
+    if docker exec "${cluster}-control-plane" ctr --namespace=k8s.io images list -q \
+        | grep -Fxq "$image"; then
+        echo "$image is already present in kind."
+        continue
+    fi
+    echo "Loading $image into kind..."
+    docker save "$image" | docker exec --privileged -i "${cluster}-control-plane" \
+        ctr --namespace=k8s.io images import --platform linux/amd64 --digests --snapshotter=overlayfs -
+done
 
 kubectl create namespace applications --dry-run=client -o yaml | kubectl apply -f -
 jq --arg app "http://localhost:${LOCAL_APP_PORT}" '
