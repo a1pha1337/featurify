@@ -1,0 +1,32 @@
+name: featurify-k8s-local
+
+services:
+  sandbox:
+    build:
+      context: ./docker/local-k8s
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+      LOCAL_APP_PORT: ${LOCAL_APP_PORT:-18080}
+      LOCAL_KEYCLOAK_PORT: ${LOCAL_KEYCLOAK_PORT:-18081}
+      LOCAL_KUBE_PORT: ${LOCAL_KUBE_PORT:-16443}
+      KUBECONFIG: /run/featurify-kubeconfig
+    ports:
+      - "127.0.0.1:${LOCAL_APP_PORT:-18080}:8080"
+      - "127.0.0.1:${LOCAL_KEYCLOAK_PORT:-18081}:8081"
+      - "127.0.0.1:${LOCAL_GRPC_PORT:-19090}:9090"
+      - "127.0.0.1:${LOCAL_KUBE_PORT:-16443}:6443"
+    volumes:
+      - kind-data:/var/lib/docker
+      - ./:/workspace:ro
+      - ./.local/k8s:/state
+    stop_grace_period: 90s
+    healthcheck:
+      test: ["CMD", "/lab/health.sh"]
+      interval: 15s
+      timeout: 10s
+      start_period: 15m
+      retries: 8
+
+volumes:
+  kind-data:

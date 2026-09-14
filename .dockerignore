@@ -4,6 +4,7 @@
 .git
 .kotlin
 .idea
+.local
 build
 **/build
 **/.gradle

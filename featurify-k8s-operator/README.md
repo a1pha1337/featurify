@@ -1,5 +1,9 @@
 # Featurify Kubernetes Operator
 
+Для проверки всего стека одной командой используйте
+[локальный kind-стенд через Docker Compose](../docker/local-k8s/README.md):
+`docker compose -f docker-compose.k8s.yaml up --build -d --wait --wait-timeout 1200`.
+
 Оператор на Java Operator SDK синхронизирует `FeaturifyNamespace` с административным
 API Featurify. Один Kubernetes CR (Custom Resource) описывает один namespace Featurify:
 его название, глобальные фичи, группы, типы и значения фич.

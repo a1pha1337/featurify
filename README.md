@@ -61,6 +61,15 @@ Flyway-миграции сформулировано отдельно и кон�
 
 ## Локальный запуск всего окружения
 
+Для запуска Featurify вместе с оператором, PostgreSQL и Keycloak **в Kubernetes**
+есть отдельный [Compose-стенд на kind](docker/local-k8s/README.md):
+
+```shell
+docker compose -f docker-compose.k8s.yaml up --build -d --wait --wait-timeout 1200
+```
+
+UI этого стенда доступен на `http://localhost:18080`; обычный Compose ниже остаётся отдельным окружением.
+
 Требуется только Docker с Compose:
 
 ```shell
