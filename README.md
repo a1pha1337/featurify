@@ -35,6 +35,13 @@
 | `featurify-grpc-client`  | Java-клиент без Spring: авторизация, соединение, TLS, deadline                               |
 | `featurify-grpc-starter` | Общая автоконфигурация клиента для Spring Boot 2, 3 и 4                                      |
 | `featurify-demo`         | Demo-приложение на Spring Boot 4: HTTP-диагностика gRPC-клиента, кеша и групп                 |
+| `featurify-k8s-operator` | Java Operator SDK: декларативное управление namespace через Kubernetes CR |
+
+Оператор устанавливается отдельно; CRD, Deployment/RBAC, пример и описание всех сценариев —
+в [featurify-k8s-operator/README.md](featurify-k8s-operator/README.md).
+Он поддерживает `Exclusive/Shared`, `Managed/InitialOnly`, явное принятие существующих
+ресурсов и `Retain/Delete` при удалении CR. Владение проверяется сервером и отображается в UI.
+Административные ответы namespace/групп/фич дополнены полями управления; публичный REST/gRPC не меняется.
 
 Сервис зависит от `featurify-api` и `featurify-grpc-api`.
 Клиентская цепочка: `featurify-grpc-starter` → `featurify-grpc-client` → `featurify-grpc-api`.
@@ -157,6 +164,12 @@ Keycloak JWT и browser session сами по себе не дают досту�
 | `AdminFeatureController` (включая историю, группы и namespace) | Keycloak JWT или OAuth2 login session      | Администрирование                |
 | `PublicFeatureController`                                      | Namespace-токен                            | Только чтение в namespace токена |
 | gRPC `FeatureService`                                          | Namespace-токен в metadata `authorization` | Только чтение в namespace токена |
+
+Endpoints `/api/v1/operator/namespaces/{key}` (PUT) и `/{key}/cleanup` (POST)
+требуют Keycloak JWT со scope `featurify.operator` и claim `featurify_namespace_keys`,
+содержащим разрешённый ключ. Такие JWT не допускаются к остальным административным
+API. Секреты оператора не являются namespace-токенами; настройки client credentials
+описаны в README модуля оператора.
 
 Namespace-токены не предоставляют административных прав и не сохраняются в HTTP-сессии.
 

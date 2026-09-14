@@ -1,0 +1,183 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: featurifynamespaces.featurify.io
+spec:
+  group: featurify.io
+  scope: Namespaced
+  names:
+    plural: featurifynamespaces
+    singular: featurifynamespace
+    kind: FeaturifyNamespace
+    shortNames: [ffns]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Key
+          type: string
+          jsonPath: .spec.key
+        - name: Ownership
+          type: string
+          jsonPath: .spec.management.ownershipPolicy
+        - name: Values
+          type: string
+          jsonPath: .spec.management.valuePolicy
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [key, displayName]
+              properties:
+                key:
+                  type: string
+                  maxLength: 255
+                  pattern: '^[A-Za-z][A-Za-z0-9]*([.-][A-Za-z0-9]+)*$'
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: spec.key is immutable
+                    - rule: self != 'default'
+                      message: The system default namespace cannot be managed
+                displayName:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  pattern: '\S'
+                management:
+                  type: object
+                  default: {}
+                  properties:
+                    ownershipPolicy:
+                      type: string
+                      enum: [Exclusive, Shared]
+                      default: Exclusive
+                      x-kubernetes-validations:
+                        - rule: self == oldSelf
+                          message: ownershipPolicy is immutable
+                    valuePolicy:
+                      type: string
+                      enum: [Managed, InitialOnly]
+                      default: Managed
+                    deletionPolicy:
+                      type: string
+                      enum: [Retain, Delete]
+                      default: Retain
+                    adoptExisting:
+                      type: boolean
+                      default: false
+                features: &features
+                  type: array
+                  default: []
+                  maxItems: 1000
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [key]
+                  items:
+                    type: object
+                    required: [key, type]
+                    properties:
+                      key:
+                        type: string
+                        maxLength: 255
+                        pattern: '^[A-Za-z][A-Za-z0-9]*([.-][A-Za-z0-9]+)*$'
+                      type:
+                        type: string
+                        enum: [BOOLEAN, ENUM, VECTOR]
+                      description:
+                        type: string
+                        maxLength: 2000
+                        default: ''
+                      booleanValue:
+                        type: boolean
+                      enumValue:
+                        type: string
+                        minLength: 1
+                        maxLength: 255
+                      enumOptions:
+                        type: array
+                        maxItems: 100
+                        x-kubernetes-list-type: set
+                        items:
+                          type: string
+                          minLength: 1
+                          maxLength: 255
+                          pattern: '\S'
+                      vectorValues:
+                        type: object
+                        minProperties: 1
+                        maxProperties: 100
+                        additionalProperties:
+                          type: boolean
+                    x-kubernetes-validations:
+                      - rule: "self.type == 'BOOLEAN' ? has(self.booleanValue) : !has(self.booleanValue)"
+                        message: booleanValue is required only for BOOLEAN
+                      - rule: "self.type == 'ENUM' ? (has(self.enumValue) && has(self.enumOptions) && size(self.enumOptions) > 0) : (!has(self.enumValue) && !has(self.enumOptions))"
+                        message: ENUM requires enumValue and nonempty enumOptions
+                      - rule: "self.type == 'VECTOR' ? has(self.vectorValues) : !has(self.vectorValues)"
+                        message: vectorValues is required only for VECTOR
+                groups:
+                  type: array
+                  default: []
+                  maxItems: 100
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [key]
+                  items:
+                    type: object
+                    required: [key, displayName]
+                    properties:
+                      key:
+                        type: string
+                        maxLength: 255
+                        pattern: '^[A-Za-z][A-Za-z0-9]*([.-][A-Za-z0-9]+)*$'
+                      displayName:
+                        type: string
+                        minLength: 1
+                        maxLength: 255
+                        pattern: '\S'
+                      features: *features
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, observedGeneration, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ['True', 'False', Unknown]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time

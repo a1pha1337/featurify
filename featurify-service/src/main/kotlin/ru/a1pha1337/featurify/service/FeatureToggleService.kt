@@ -43,10 +43,12 @@ class FeatureToggleService(
     private val auditRepository: FeatureAuditLogRepository,
     private val actorProvider: ActorProvider,
     private val clock: Clock,
+    private val manifestGuard: ManifestGuard,
 ) {
     @Transactional
     fun createNamespace(request: CreateNamespaceRequest): NamespaceResponse {
         val key = normalizeNamespaceKey(request.key)
+        manifestGuard.lock(key)
         val now = clock.instant()
         if (key == "default") throw validation("key", "is reserved for the system Default namespace")
         return namespaceRepository
@@ -69,7 +71,9 @@ class FeatureToggleService(
         namespaceKey: String?,
         request: CreateFeatureGroupRequest,
     ): FeatureGroupResponse {
+        manifestGuard.lock(namespaceKey)
         val namespace = requireNamespace(namespaceKey)
+        manifestGuard.create(checkNotNull(namespace.id))
         val key = normalizeGroup(request.key) ?: throw validation("key", "must not be blank")
         if (request.displayName.isBlank() || request.displayName.length > 255) {
             throw validation("displayName", "must contain between 1 and 255 characters")
@@ -98,7 +102,9 @@ class FeatureToggleService(
 
     @Transactional
     fun deleteNamespace(namespaceKey: String) {
+        manifestGuard.lock(namespaceKey)
         val namespace = requireNamespace(namespaceKey)
+        manifestGuard.deleteNamespace(checkNotNull(namespace.id))
         if (namespace.defaultNamespace || namespace.key == "default") {
             throw ConflictException("The system Default namespace cannot be deleted")
         }
@@ -111,8 +117,10 @@ class FeatureToggleService(
         groupKey: String,
         version: Long?,
     ) {
+        manifestGuard.lock(namespaceKey)
         val namespace = requireNamespace(namespaceKey)
         val group = requireGroup(namespace.id!!, groupKey)
+        manifestGuard.deleteGroup(checkNotNull(namespace.id), checkNotNull(group.id))
         requireVersion(group.version, version)
         try {
             groupRepository.delete(group)
@@ -128,6 +136,7 @@ class FeatureToggleService(
         currentGroup: String?,
         request: MoveFeatureRequest,
     ): AdminFeatureResponse {
+        manifestGuard.lock(namespaceKey)
         val namespace = requireNamespace(namespaceKey)
         val currentGroupKey = normalizeGroup(currentGroup)
         val current = requireFeature(namespace.id!!, key, currentGroupKey)
@@ -135,6 +144,7 @@ class FeatureToggleService(
         val targetGroupKey = normalizeGroup(request.targetGroup)
         val targetGroup = targetGroupKey?.let { requireGroup(namespace.id!!, it) }
         if (targetGroup?.id == current.groupId) return current.toAdminResponse(targetGroupKey, optionsFor(current))
+        manifestGuard.structure(current)
         val existing =
             if (targetGroup == null) {
                 featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespace.id, key)
@@ -153,7 +163,9 @@ class FeatureToggleService(
         namespaceKey: String?,
         request: CreateFeatureRequest,
     ): AdminFeatureResponse {
+        manifestGuard.lock(namespaceKey)
         val namespace = requireNamespace(namespaceKey)
+        manifestGuard.create(checkNotNull(namespace.id))
         val key = normalizeFeatureKey(request.key)
         val type = request.type ?: throw validation("type", "must not be null")
         val group = normalizeGroup(request.group)?.let { requireGroup(namespace.id!!, it) }
@@ -332,10 +344,12 @@ class FeatureToggleService(
         group: String?,
         request: PatchFeatureRequest,
     ): AdminFeatureResponse {
+        manifestGuard.lock(namespaceKey)
         val namespace = requireNamespace(namespaceKey)
         val groupKey = normalizeGroup(group)
         val current = requireFeature(namespace.id!!, key, groupKey)
         requireVersion(current, request.version)
+        manifestGuard.patch(current, request)
         validatePatch(current, request)
 
         val newValue =
@@ -368,9 +382,11 @@ class FeatureToggleService(
         group: String?,
         version: Long?,
     ) {
+        manifestGuard.lock(namespaceKey)
         val namespace = requireNamespace(namespaceKey)
         val current = requireFeature(namespace.id!!, key, normalizeGroup(group))
         requireVersion(current, version)
+        manifestGuard.structure(current)
         try {
             featureRepository.delete(current)
         } catch (exception: OptimisticLockingFailureException) {
@@ -412,7 +428,7 @@ class FeatureToggleService(
         }
     }
 
-    private fun validateCreation(
+    internal fun validateCreation(
         request: CreateFeatureRequest,
         type: FeatureType,
     ) {
@@ -610,7 +626,20 @@ class FeatureToggleService(
         return normalized
     }
 
-    private fun Namespace.toResponse() = NamespaceResponse(id!!, key, displayName, active, createdAt, updatedAt, defaultNamespace)
+    private fun Namespace.toResponse(): NamespaceResponse {
+        val binding = manifestGuard.binding(checkNotNull(id))
+        return NamespaceResponse(
+            id,
+            key,
+            displayName,
+            active,
+            createdAt,
+            updatedAt,
+            defaultNamespace,
+            managedBy = binding?.owner?.let { "${it.clusterId}/${it.kubernetesNamespace}/${it.name}" },
+            exclusive = binding?.spec?.management?.ownershipPolicy == ru.a1pha1337.featurify.dto.OwnershipPolicy.Exclusive,
+        )
+    }
 
     private fun FeatureGroup.toResponse() =
         FeatureGroupResponse(
@@ -620,6 +649,7 @@ class FeatureToggleService(
             version = version ?: 0,
             createdAt = createdAt,
             updatedAt = updatedAt,
+            managed = manifestGuard.binding(namespaceId)?.groups?.contains(id) == true,
         )
 
     private fun Feature.toPublicResponse(
@@ -647,6 +677,11 @@ class FeatureToggleService(
         version = version ?: 0,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        managed = manifestGuard.binding(namespaceId)?.features?.contains(id) == true,
+        valueManaged =
+            manifestGuard.binding(namespaceId)?.let {
+                id in it.features && it.spec?.management?.valuePolicy == ru.a1pha1337.featurify.dto.ValuePolicy.Managed
+            } == true,
     )
 
     private fun validation(

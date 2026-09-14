@@ -10,4 +10,5 @@ data class FeatureGroupResponse(
     val version: Long,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val managed: Boolean = false,
 )

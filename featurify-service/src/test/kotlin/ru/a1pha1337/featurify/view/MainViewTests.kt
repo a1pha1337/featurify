@@ -279,6 +279,31 @@ class MainViewTests {
         assertThat(selectedLabel(combo(dialog(), "Group"))).isEqualTo("Source (source)")
     }
 
+    @Test
+    fun `managed feature hides structural edits but initial only keeps value controls`() {
+        feature = feature.copy(managed = true, valueManaged = false)
+        grid().asSingleSelect().value = feature
+        assertThat(button(view, "Delete").isEnabled).isFalse()
+        assertThat(button(view, "Edit").isEnabled).isTrue()
+        assertThat(valueEditor()).isInstanceOf(Button::class.java)
+        button(view, "Edit").click()
+        assertThat(combo(dialog(), "Group").isEnabled).isFalse()
+    }
+
+    @Test
+    fun `managed values are read only and exclusive namespace disables creation`() {
+        feature = feature.copy(managed = true, valueManaged = true)
+        every { service.listNamespaces() } returns listOf(namespace.copy(managedBy = "cluster/app/checkout", exclusive = true))
+        ui.remove(view)
+        view = MainView(service, factory.validator, accessTokens)
+        ui.add(view)
+        grid().asSingleSelect().value = feature
+        assertThat(button(view, "New feature").isEnabled).isFalse()
+        assertThat(button(view, "New group").isEnabled).isFalse()
+        assertThat(button(view, "Edit").isEnabled).isFalse()
+        assertThat(valueEditor()).isNotInstanceOf(Button::class.java)
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun valueEditor(): Component =
         (grid().getColumnByKey("value").renderer as com.vaadin.flow.data.renderer.ComponentRenderer<Component, AdminFeatureResponse>)

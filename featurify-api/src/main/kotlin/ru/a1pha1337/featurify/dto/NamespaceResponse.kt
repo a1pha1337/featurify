@@ -11,4 +11,6 @@ data class NamespaceResponse(
     val createdAt: Instant,
     val updatedAt: Instant,
     val defaultNamespace: Boolean,
+    val managedBy: String? = null,
+    val exclusive: Boolean = false,
 )

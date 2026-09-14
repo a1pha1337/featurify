@@ -61,6 +61,7 @@ class FeatureToggleServiceTests {
                 auditRepository,
                 actorProvider,
                 Clock.fixed(now, ZoneOffset.UTC),
+                mockk<ManifestGuard>(relaxed = true),
             )
         every { namespaceRepository.findByKey("blue") } returns Namespace(namespaceId, "blue", "Blue", true, now, now)
     }

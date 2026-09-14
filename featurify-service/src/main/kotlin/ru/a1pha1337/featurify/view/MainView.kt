@@ -151,7 +151,7 @@ class MainView(
         grid
             .addComponentColumn { feature ->
                 Div(
-                    Span(feature.key).apply { addClassName("feature-key") },
+                    Span(feature.key + if (feature.managed) " � Kubernetes" else "").apply { addClassName("feature-key") },
                     Span(feature.description.ifBlank { "No description" }).apply { addClassName("feature-description") },
                 ).apply { addClassName("feature-name") }
             }.setHeader("Feature")
@@ -246,6 +246,7 @@ class MainView(
 
     private fun valueEditor(feature: AdminFeatureResponse): Component {
         val namespaceKey = namespaceSelect.value?.key ?: return Span()
+        if (feature.valueManaged) return Span("${feature.value} (Kubernetes)")
         var current = feature
         if (feature.type == FeatureType.VECTOR) {
             val elements =
@@ -365,8 +366,8 @@ class MainView(
 
     private fun updateSelection(feature: AdminFeatureResponse?) {
         val selected = feature != null
-        editButton.isEnabled = selected
-        deleteButton.isEnabled = selected
+        editButton.isEnabled = selected && feature?.valueManaged != true
+        deleteButton.isEnabled = selected && feature?.managed != true
         historyButton.isEnabled = feature != null
         selectionSummary.text = feature?.let { "Selected: ${featureName(it)}" } ?: "Select a feature to manage it"
     }
@@ -418,8 +419,15 @@ class MainView(
         updateSelection(null)
         val namespace = namespaceSelect.value
         tokensButton.isEnabled = namespace != null
-        deleteNamespaceButton.isEnabled = namespace != null && !namespace.defaultNamespace && namespace.key != "default"
+        deleteNamespaceButton.isEnabled =
+            namespace != null &&
+            !namespace.defaultNamespace &&
+            namespace.key != "default" &&
+            namespace.managedBy == null
         listOf(createFeatureButton, createGroupButton, groupsButton).forEach { it.isEnabled = namespace != null }
+        createFeatureButton.isEnabled = namespace != null && !namespace.exclusive
+        createGroupButton.isEnabled = namespace != null && !namespace.exclusive
+        namespaceSelect.helperText = namespace?.managedBy?.let { "Managed by Kubernetes: $it" } ?: ""
         groupSelect.isEnabled = namespace != null
         val query = keyFilter.value.trim()
         val invalidQuery = query.isNotEmpty() && query.length < 3
@@ -808,6 +816,7 @@ class MainView(
                     dialog.close()
                     openDeleteGroupDialog(group)
                 }.apply {
+                    isEnabled = !group.managed
                     addThemeVariants(ButtonVariant.LUMO_ERROR, ButtonVariant.LUMO_TERTIARY)
                 }
             }.setHeader("Action")
@@ -824,7 +833,10 @@ class MainView(
             Button("New group") {
                 dialog.close()
                 openCreateGroupDialog()
-            }.apply { addThemeVariants(ButtonVariant.LUMO_PRIMARY) },
+            }.apply {
+                isEnabled = namespaceSelect.value?.exclusive != true
+                addThemeVariants(ButtonVariant.LUMO_PRIMARY)
+            },
         )
         dialog.open()
     }
@@ -893,6 +905,8 @@ class MainView(
                 value = elements.filterValues { it }.keys
                 isVisible = feature.type == FeatureType.VECTOR
             }
+        group.isEnabled = !feature.managed
+        description.isReadOnly = feature.managed
         dialog.add(form(group, description, booleanValue, enumValue, vectorEnabled))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(

@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: featurify-k8s-operator
+  namespace: applications
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: featurify-k8s-operator
+  namespace: applications
+rules:
+  - apiGroups: [featurify.io]
+    resources: [featurifynamespaces]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [featurify.io]
+    resources: [featurifynamespaces/status, featurifynamespaces/finalizers]
+    verbs: [get, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: featurify-k8s-operator
+  namespace: applications
+subjects:
+  - kind: ServiceAccount
+    name: featurify-k8s-operator
+    namespace: applications
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: featurify-k8s-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: featurify-k8s-operator
+  namespace: applications
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: featurify-k8s-operator
+  template:
+    metadata:
+      labels:
+        app: featurify-k8s-operator
+    spec:
+      serviceAccountName: featurify-k8s-operator
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: operator
+          image: featurify-k8s-operator:0.0.1-SNAPSHOT
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: FEATURIFY_CLUSTER_ID
+              value: development
+            - name: FEATURIFY_URL
+              value: http://featurify:8080
+            - name: KEYCLOAK_TOKEN_URL
+              value: http://keycloak:8080/realms/featurify/protocol/openid-connect/token
+            - name: KEYCLOAK_CLIENT_ID
+              value: featurify-k8s-operator
+            - name: KEYCLOAK_CLIENT_SECRET_FILE
+              value: /var/run/featurify/client-secret
+            - name: RECONCILE_INTERVAL_SECONDS
+              value: '30'
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          volumeMounts:
+            - name: credentials
+              mountPath: /var/run/featurify
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: credentials
+          secret:
+            secretName: featurify-operator-keycloak
+            defaultMode: 0440
+        - name: tmp
+          emptyDir: {}

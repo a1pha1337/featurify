@@ -1,0 +1,30 @@
+apiVersion: featurify.io/v1alpha1
+kind: FeaturifyNamespace
+metadata:
+  name: checkout
+  namespace: applications
+spec:
+  key: checkout
+  displayName: Checkout
+  management:
+    ownershipPolicy: Exclusive
+    valuePolicy: Managed
+    deletionPolicy: Retain
+    adoptExisting: false
+  features:
+    - key: new-checkout
+      type: BOOLEAN
+      booleanValue: false
+  groups:
+    - key: payments
+      displayName: Payments
+      features:
+        - key: provider
+          type: ENUM
+          enumOptions: [stripe, paypal]
+          enumValue: stripe
+        - key: methods
+          type: VECTOR
+          vectorValues:
+            CARD: true
+            CASH: false

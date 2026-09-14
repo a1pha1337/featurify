@@ -9,6 +9,7 @@ COPY featurify-grpc-starter/build.gradle.kts featurify-grpc-starter/build.gradle
 COPY featurify-grpc-api/build.gradle.kts featurify-grpc-api/build.gradle.kts
 COPY featurify-grpc-client/build.gradle.kts featurify-grpc-client/build.gradle.kts
 COPY featurify-demo/build.gradle.kts featurify-demo/build.gradle.kts
+COPY featurify-k8s-operator/build.gradle.kts featurify-k8s-operator/build.gradle.kts
 RUN chmod +x gradlew
 RUN ./gradlew --no-daemon --quiet :featurify-service:dependencies
 COPY featurify-api/src featurify-api/src

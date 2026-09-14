@@ -255,3 +255,27 @@ CREATE TRIGGER trg_feature_type_immutable
     ON feature
     FOR EACH ROW
 EXECUTE FUNCTION prevent_feature_type_change();
+
+-- Ownership and the last accepted generation survive operator restarts. Released rows
+-- are tombstones: delayed requests from a deleted CR must never recreate its data.
+CREATE TABLE namespace_manifest (
+    id UUID PRIMARY KEY,
+    namespace_key VARCHAR(255) NOT NULL,
+    namespace_id UUID REFERENCES namespace(id) ON DELETE SET NULL,
+    owner JSONB NOT NULL,
+    principal VARCHAR(255) NOT NULL,
+    generation BIGINT NOT NULL CHECK (generation > 0),
+    spec JSONB,
+    managed_groups JSONB NOT NULL DEFAULT '[]',
+    managed_features JSONB NOT NULL DEFAULT '[]',
+    released BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE UNIQUE INDEX uq_namespace_manifest_active ON namespace_manifest(namespace_key) WHERE NOT released;
+CREATE TABLE namespace_manifest_audit (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    binding_id UUID NOT NULL REFERENCES namespace_manifest(id),
+    generation BIGINT NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    principal VARCHAR(255) NOT NULL,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -45,3 +45,7 @@ dependencyManagement {
         mavenBom("com.vaadin:vaadin-bom:${property("vaadinVersion")}")
     }
 }
+
+tasks.named<Test>("test") {
+    inputs.property("databaseTestsEnabled", providers.environmentVariable("FEATURIFY_DB_TESTS").orElse("false"))
+}

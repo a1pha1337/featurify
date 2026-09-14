@@ -29,6 +29,9 @@ import java.util.UUID
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import(
     FeatureToggleService::class,
+    ManifestGuard::class,
+    ru.a1pha1337.featurify.repository.ManifestRepository::class,
+    org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration::class,
     AccessTokenService::class,
     TimeConfiguration::class,
     ru.a1pha1337.featurify.repository.FeatureRepository::class,

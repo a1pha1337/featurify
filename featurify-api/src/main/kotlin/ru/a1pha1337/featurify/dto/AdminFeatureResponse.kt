@@ -13,4 +13,6 @@ data class AdminFeatureResponse(
     val version: Long,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val managed: Boolean = false,
+    val valueManaged: Boolean = false,
 )
