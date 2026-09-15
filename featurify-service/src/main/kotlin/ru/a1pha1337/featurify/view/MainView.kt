@@ -246,7 +246,7 @@ class MainView(
 
     private fun valueEditor(feature: AdminFeatureResponse): Component {
         val namespaceKey = namespaceSelect.value?.key ?: return Span()
-        if (feature.valueManaged) return Span("${feature.value} (Kubernetes)")
+        val valueManaged = feature.valueManaged
         var current = feature
         if (feature.type == FeatureType.VECTOR) {
             val elements =
@@ -256,6 +256,8 @@ class MainView(
                 }
             vectorValues(feature).forEach { (name, _) ->
                 val toggle = featureSwitch("Toggle ${featureName(feature)} element $name")
+                toggle.isEnabled = !valueManaged
+                markManagedValue(toggle, valueManaged)
 
                 fun render() {
                     val enabled = vectorValues(current).getValue(name)
@@ -282,6 +284,8 @@ class MainView(
         }
         if (feature.type == FeatureType.BOOLEAN) {
             val toggle = featureSwitch("Toggle ${featureName(feature)}")
+            toggle.isEnabled = !valueManaged
+            markManagedValue(toggle, valueManaged)
 
             fun render() {
                 toggle.text = if (current.value == true) "Enabled" else "Disabled"
@@ -305,11 +309,13 @@ class MainView(
         }
         return ComboBox<String>().apply {
             addClassName("inline-enum")
+            markManagedValue(this, valueManaged)
             setAriaLabel("Value for ${featureName(feature)}")
             setItems(feature.enumOptions ?: emptyList())
             value = feature.value as String
             isAllowCustomValue = false
             isClearButtonVisible = false
+            isEnabled = !valueManaged
             addValueChangeListener { event ->
                 if (event.isFromClient && event.value == null) value = current.value as String
                 if (event.isFromClient && event.value != null && event.value != current.value) {
@@ -329,6 +335,16 @@ class MainView(
                     }
                 }
             }
+        }
+    }
+
+    private fun markManagedValue(
+        component: Component,
+        managed: Boolean,
+    ) {
+        if (managed) {
+            component.addClassName("managed-value")
+            component.element.setAttribute("title", "Managed by Kubernetes")
         }
     }
 

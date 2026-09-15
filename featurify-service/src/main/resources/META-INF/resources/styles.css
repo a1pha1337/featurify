@@ -95,3 +95,4 @@ body { margin: 0; background: #f3f5fa; }
 .feature-switch[aria-checked="true"] .switch-thumb { transform: translateX(16px); }
 .feature-switch:focus-visible { outline: 2px solid #2855d9; outline-offset: 4px; }
 .inline-enum { width: 100%; min-width: 140px; padding: 0; }
+.managed-value { opacity: .58; }

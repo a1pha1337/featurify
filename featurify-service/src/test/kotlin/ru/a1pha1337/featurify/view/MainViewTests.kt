@@ -7,6 +7,7 @@ import com.vaadin.flow.component.checkbox.CheckboxGroup
 import com.vaadin.flow.component.combobox.ComboBox
 import com.vaadin.flow.component.dialog.Dialog
 import com.vaadin.flow.component.grid.Grid
+import com.vaadin.flow.component.orderedlayout.VerticalLayout
 import com.vaadin.flow.component.textfield.TextField
 import com.vaadin.flow.server.VaadinSession
 import io.mockk.every
@@ -301,7 +302,39 @@ class MainViewTests {
         assertThat(button(view, "New feature").isEnabled).isFalse()
         assertThat(button(view, "New group").isEnabled).isFalse()
         assertThat(button(view, "Edit").isEnabled).isFalse()
-        assertThat(valueEditor()).isNotInstanceOf(Button::class.java)
+        val toggle = valueEditor() as Button
+        assertThat(toggle.isEnabled).isFalse()
+        assertThat(toggle.element.getAttribute("title")).isEqualTo("Managed by Kubernetes")
+        assertThat(toggle.classNames).contains("managed-value")
+    }
+
+    @Test
+    fun `managed enum and vector values keep their controls but cannot be changed`() {
+        feature =
+            feature.copy(
+                type = FeatureType.ENUM,
+                value = "stripe",
+                enumOptions = listOf("stripe", "paypal"),
+                valueManaged = true,
+            )
+        @Suppress("UNCHECKED_CAST")
+        val enumPicker = valueEditor() as ComboBox<String>
+        assertThat(enumPicker.isEnabled).isFalse()
+        assertThat(enumPicker.value).isEqualTo("stripe")
+        assertThat(enumPicker.listDataView.items.toList()).containsExactly("stripe", "paypal")
+        assertThat(enumPicker.classNames).contains("managed-value")
+
+        feature =
+            feature.copy(
+                type = FeatureType.VECTOR,
+                value = mapOf("CASH" to false, "TRASH" to false, "CARD" to false),
+            )
+        val vector = valueEditor() as VerticalLayout
+        val toggles = components(vector).filterIsInstance<Button>()
+        assertThat(toggles).hasSize(3)
+        assertThat(toggles).allMatch { !it.isEnabled }
+        assertThat(toggles.map { it.element.getAttribute("aria-checked") })
+            .containsExactly("false", "false", "false")
     }
 
     @Suppress("UNCHECKED_CAST")
