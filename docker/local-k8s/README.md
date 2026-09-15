@@ -34,6 +34,9 @@ Compose запускает один privileged контейнер `sandbox` с �
 - `featurify-k8s-operator`, его ServiceAccount, Role/RoleBinding и CRD;
 - пример `FeaturifyNamespace/checkout` с BOOLEAN, ENUM и VECTOR.
 
+UI-клиент realm содержит стандартные OIDC scopes `profile` и `email`; bootstrap
+оператора добавляет свой scope `featurify.operator`, не заменяя стандартные scopes.
+
 Приложения работают именно внутри Kubernetes. Host Docker socket не монтируется;
 вложенный daemon хранит кластер, PVC и кеш сборки в отдельном Compose volume `kind-data`.
 Privileged режим нужен для Docker-in-Docker/kind. Это стенд для локальной разработки:

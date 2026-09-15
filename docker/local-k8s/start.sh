@@ -80,7 +80,7 @@ jq --arg app "http://localhost:${LOCAL_APP_PORT}" '
     .clients[0].redirectUris = [$app + "/login/oauth2/code/keycloak"] |
     .clients[0].webOrigins = [$app] |
     .clients[0].attributes["post.logout.redirect.uris"] = ($app + "/*") |
-    .clientScopes = [{name: "featurify.operator", protocol: "openid-connect", attributes: {"include.in.token.scope": "true"}}] |
+    .clientScopes = ((.clientScopes // []) + [{name: "featurify.operator", protocol: "openid-connect", attributes: {"include.in.token.scope": "true"}}]) |
     .clients += [{clientId: "featurify-k8s-operator", enabled: true, protocol: "openid-connect",
         publicClient: false, secret: "local-operator-secret", serviceAccountsEnabled: true,
         standardFlowEnabled: false, directAccessGrantsEnabled: false, defaultClientScopes: ["featurify.operator"],
