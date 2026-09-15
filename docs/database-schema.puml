@@ -1,0 +1,184 @@
+@startuml featurify-database-schema
+
+title Featurify — схема таблиц PostgreSQL
+
+left to right direction
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam entity {
+    BackgroundColor #FFFDF8
+    BorderColor #52606D
+    FontColor #1F2937
+}
+skinparam ArrowColor #52606D
+skinparam NoteBorderColor #9AA5B1
+skinparam NoteBackgroundColor #F8FAFC
+
+legend right
+    |= Обозначение | Значение |
+    | <color:#2563EB>PK</color> | первичный ключ |
+    | <color:#16A34A>FK</color> | внешний ключ |
+    | <color:#D97706>NN</color> | NOT NULL |
+    | <color:#7C3AED>UQ</color> | UNIQUE или уникальный индекс |
+    Поля с суффиксом «генер.» вычисляются PostgreSQL.
+endlegend
+
+entity "namespace" as namespaceTable {
+    * id : UUID <<PK>>
+    --
+    * key : VARCHAR(255) <<NN/UQ>>
+    * display_name : VARCHAR(255) <<NN>>
+    * active : BOOLEAN <<NN>>
+    * created_at : TIMESTAMPTZ <<NN>>
+    * updated_at : TIMESTAMPTZ <<NN>>
+    * default_namespace : BOOLEAN <<NN>>
+}
+
+entity "namespace_access_token" as accessToken {
+    * id : UUID <<PK>>
+    --
+    * namespace_id : UUID <<FK/NN>>
+    * name : VARCHAR(255) <<NN>>
+    * token_hash : VARCHAR(60) <<NN>>
+    * created_at : TIMESTAMPTZ <<NN>>
+}
+
+entity "feature_group" as featureGroup {
+    * id : UUID <<PK>>
+    --
+    * namespace_id : UUID <<FK/NN>>
+    * key : VARCHAR(255) <<NN>>
+    * display_name : VARCHAR(255) <<NN>>
+    * version : BIGINT <<NN>>
+    * created_at : TIMESTAMPTZ <<NN>>
+    * updated_at : TIMESTAMPTZ <<NN>>
+}
+
+entity "feature" as featureTable {
+    * id : UUID <<PK>>
+    --
+    * namespace_id : UUID <<FK/NN>>
+    group_id : UUID <<FK>>
+    * key : VARCHAR(255) <<NN>>
+    * type : VARCHAR(16) <<NN>>
+    * description : VARCHAR(2000) <<NN>>
+    * version : BIGINT <<NN>>
+    * created_at : TIMESTAMPTZ <<NN>>
+    * updated_at : TIMESTAMPTZ <<NN>>
+}
+
+entity "feature_boolean_value" as booleanValue {
+    * feature_id : UUID <<PK/FK>>
+    --
+    feature_type : VARCHAR(16) <<генер.>>
+    * enabled : BOOLEAN <<NN>>
+}
+
+entity "feature_enum_option" as enumOption {
+    * feature_id : UUID <<PK/FK>>
+    * value : VARCHAR(255) <<PK>>
+    --
+    feature_type : VARCHAR(16) <<генер.>>
+    * sort_order : INTEGER <<NN>>
+}
+
+entity "feature_enum_value" as enumValue {
+    * feature_id : UUID <<PK/FK>>
+    --
+    feature_type : VARCHAR(16) <<генер.>>
+    * value : VARCHAR(255) <<NN, FK>>
+}
+
+entity "feature_vector_element" as vectorElement {
+    * feature_id : UUID <<PK, FK>>
+    * element : VARCHAR(255) <<PK>>
+    --
+    feature_type : VARCHAR(16) <<генер.>>
+    * enabled : BOOLEAN <<NN>>
+}
+
+entity "feature_audit_log" as featureAudit {
+    * id : UUID <<PK>>
+    --
+    * namespace_id : UUID <<FK/NN>>
+    * feature_id : UUID <<FK/NN>>
+    * namespace_key : VARCHAR(255) <<NN>>
+    feature_group : VARCHAR(255)
+    * feature_key : VARCHAR(255) <<NN>>
+    * operation : VARCHAR(32) <<NN>>
+    old_value : TEXT
+    new_value : TEXT
+    * changed_by : VARCHAR(255) <<NN>>
+    * changed_at : TIMESTAMPTZ <<NN>>
+}
+
+entity "namespace_manifest" as manifestTable {
+    * id : UUID <<PK>>
+    --
+    * namespace_key : VARCHAR(255) <<NN>>
+    namespace_id : UUID <<FK>>
+    * owner : JSONB <<NN>>
+    * principal : VARCHAR(255) <<NN>>
+    * generation : BIGINT <<NN>>
+    spec : JSONB
+    * managed_groups : JSONB <<NN>>
+    * managed_features : JSONB <<NN>>
+    * released : BOOLEAN <<NN>>
+}
+
+entity "namespace_manifest_audit" as manifestAudit {
+    * id : UUID <<PK>>
+    --
+    * binding_id : UUID <<FK/NN>>
+    * generation : BIGINT <<NN>>
+    * action : VARCHAR(32) <<NN>>
+    * principal : VARCHAR(255) <<NN>>
+    * changed_at : TIMESTAMPTZ <<NN>>
+}
+
+namespaceTable "1" -- "0..*" accessToken : "namespace_id\nON DELETE CASCADE"
+namespaceTable "1" -- "0..*" featureGroup : "namespace_id\nON DELETE CASCADE"
+namespaceTable "1" -- "0..*" featureTable : "namespace_id\nON DELETE CASCADE"
+featureGroup "1" -- "0..*" featureTable : "(id, namespace_id)\nON DELETE CASCADE"
+
+featureTable "1" -- "0..1" booleanValue : "(id, type)\nтип = BOOLEAN\nON DELETE CASCADE"
+featureTable "1" -- "0..*" enumOption : "(id, type)\nтип = ENUM\nON DELETE CASCADE"
+featureTable "1" -- "0..1" enumValue : "(id, type)\nтип = ENUM\nON DELETE CASCADE"
+enumOption "1" -- "0..1" enumValue : "(feature_id, value)\nDEFERRABLE"
+featureTable "1" -- "0..*" vectorElement : "(id, type)\nтип = VECTOR\nON DELETE CASCADE"
+
+namespaceTable "1" -- "0..*" featureAudit : "namespace_id\nON DELETE CASCADE"
+featureTable "1" -- "0..*" featureAudit : "feature_id\nON DELETE CASCADE"
+namespaceTable "0..1" -- "0..*" manifestTable : "namespace_id\nON DELETE SET NULL"
+manifestTable "1" -- "0..*" manifestAudit : "binding_id"
+
+note as feature_note
+    `group_id` может быть NULL: такая фича глобальна внутри namespace.
+    Уникальность ключа обеспечивается отдельно для групповых и глобальных фич.
+    `type` неизменяем после создания; `version` используется для optimistic locking.
+end note
+featureTable .. feature_note
+
+note right of enumValue
+    Выбранное значение обязано присутствовать
+    в `feature_enum_option` той же фичи.
+end note
+
+note bottom of vectorElement
+    Отложенные constraint-триггеры проверяют наличие полного typed value
+    в конце транзакции: BOOLEAN — 1 значение, ENUM — выбранный вариант,
+    VECTOR — от 1 до 100 элементов.
+end note
+
+note bottom of manifestTable
+    Активна не более чем одна запись на `namespace_key`.
+    Освобождённые записи (`released = TRUE`) сохраняются как tombstones,
+    чтобы старые события оператора не воссоздавали данные.
+end note
+
+note "Источник: featurify-service/src/main/resources/db/migration/V1__create_feature_toggle_schema.sql" as source_note
+source_note .. namespaceTable
+
+@enduml
