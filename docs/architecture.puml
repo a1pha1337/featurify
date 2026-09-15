@@ -99,12 +99,12 @@ grpcClient --> grpc : gRPC / HTTP2\nnamespace token
 kubernetes --> crd : apply / watch
 crd --> operator : reconcile events
 operator --> keycloak : client credentials\noperator JWT
-operator --> operatorRest : PUT / POST manifest\nKeycloak JWT + scope/grant
+operator --> operatorRest : PUT / POST manifest\nKeycloak JWT + scope
 
 ' Featurify service internals
 vaadin --> oauth : authenticated UI session
 adminRest --> oauth : JWT / session
-operatorRest --> oauth : operator scope +\nnamespace grant
+operatorRest --> oauth : operator scope
 publicRest --> namespaceFilter : namespace Bearer token
 grpc --> grpcAuth : authorization metadata
 oauth --> application : authorized request

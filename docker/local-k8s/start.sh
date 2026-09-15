@@ -83,10 +83,7 @@ jq --arg app "http://localhost:${LOCAL_APP_PORT}" '
     .clientScopes = ((.clientScopes // []) + [{name: "featurify.operator", protocol: "openid-connect", attributes: {"include.in.token.scope": "true"}}]) |
     .clients += [{clientId: "featurify-k8s-operator", enabled: true, protocol: "openid-connect",
         publicClient: false, secret: "local-operator-secret", serviceAccountsEnabled: true,
-        standardFlowEnabled: false, directAccessGrantsEnabled: false, defaultClientScopes: ["featurify.operator"],
-        protocolMappers: [{name: "namespace-keys", protocol: "openid-connect", protocolMapper: "oidc-hardcoded-claim-mapper",
-            config: {"claim.name": "featurify_namespace_keys", "claim.value": "[\"checkout\",\"catalog\"]",
-                "jsonType.label": "JSON", "access.token.claim": "true"}}]}]
+        standardFlowEnabled: false, directAccessGrantsEnabled: false, defaultClientScopes: ["featurify.operator"]}]
 ' /workspace/docker/keycloak/featurify-realm.json > /run/featurify-realm.json
 kubectl -n applications create configmap keycloak-realm --from-file=featurify-realm.json=/run/featurify-realm.json \
     --dry-run=client -o yaml | kubectl apply -f -

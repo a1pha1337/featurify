@@ -77,18 +77,16 @@ Featurify и Keycloak. Манифест Deployment рассчитан на од�
 2. Отключите interactive login и direct access grants для этого клиента.
 3. Создайте client scope `featurify.operator`, включите его в token scope и подключите
    к клиенту как **default client scope**.
-4. Добавьте в access token claim `featurify_namespace_keys` типа JSON — массив
-   разрешённых ключей, например `["checkout", "catalog"]`. В Keycloak это можно
-   сделать hardcoded claim mapper с JSON claim type. Не добавляйте этот claim
-   обычному UI-клиенту. Маска `*` не поддерживается.
-5. Сохраните client secret в Kubernetes Secret. JWT должен содержать стабильный `sub`;
+4. Сохраните client secret в Kubernetes Secret. JWT должен содержать стабильный `sub`;
    он также участвует в проверке владельца. Пересоздание Keycloak service account
    потребует освобождения старого владения, а не только замены секрета.
 
 Оператор использует административный Keycloak JWT. Namespace-токены публичного
 REST/gRPC здесь не подходят. JWT оператора не допускается к обычным административным
-API: запись проходит через endpoint оператора с проверкой `featurify_namespace_keys`.
-Право создавать CR в `applications` делегирует доступ к ключам из JWT этого оператора.
+API: запись проходит через endpoint оператора с проверкой scope `featurify.operator`.
+Оператор может создавать и сопровождать любой namespace, который передан в CR;
+предварительно добавлять его ключ в claims не нужно. Ограничение на системный namespace
+`default`, владение и остальные проверки манифеста сохраняются.
 Для другой группы доверия используйте отдельный Deployment, Kubernetes namespace и client.
 
 ### 2. Собрать образ
@@ -265,8 +263,8 @@ kubectl -n applications logs deployment/featurify-k8s-operator
 ```
 
 `Ready=False`: `InvalidManifest` — исправить поля; `Conflict` — проверить владельца,
-поколение, ENUM или ручные фичи; `AuthenticationFailed` — проверить scope, grant ключа,
-client credentials; `ServiceUnavailable` — проверить сеть и доступность зависимостей.
+поколение, ENUM или ручные фичи; `AuthenticationFailed` — проверить scope и client
+credentials; `ServiceUnavailable` — проверить сеть и доступность зависимостей.
 После изменения CR сравнивайте `status.observedGeneration` с `metadata.generation`:
 одно старое `Ready=True` до обработки нового события ещё не подтверждает применение новой версии.
 
@@ -276,7 +274,7 @@ client credentials; `ServiceUnavailable` — проверить сеть и до
 - `POST /api/v1/operator/namespaces/{key}/cleanup`: `{owner, generation, deletionPolicy}` → `204`.
 - `owner`: `{clusterId, uid, kubernetesNamespace, name}`. UID берётся из Kubernetes metadata.
 - Ошибки используют существующий `application/problem+json`; 400 — валидация,
-  403 — scope/namespace grant, 409 — конфликт владения, поколения или структуры.
+  403 — отсутствует scope оператора, 409 — конфликт владения, поколения или структуры.
 
 ```powershell
 .\gradlew.bat :featurify-k8s-operator:test :featurify-service:test

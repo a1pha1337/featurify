@@ -10,7 +10,6 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken
 import org.springframework.security.authorization.AuthorizationDecision
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
-import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
@@ -83,8 +82,7 @@ class SecurityConfiguration(
                 .access { authentication, _ ->
                     val auth = authentication.get()
                     val operator =
-                        auth.authorities.any { it.authority == "SCOPE_featurify.operator" } ||
-                            (auth.principal as? Jwt)?.hasClaim("featurify_namespace_keys") == true
+                        auth.authorities.any { it.authority == "SCOPE_featurify.operator" }
                     AuthorizationDecision(auth.isAuthenticated && auth !is AnonymousAuthenticationToken && !operator)
                 }
         }

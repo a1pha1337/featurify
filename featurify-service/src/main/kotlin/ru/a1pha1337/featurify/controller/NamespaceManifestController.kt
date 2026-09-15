@@ -26,7 +26,7 @@ class NamespaceManifestController(
         @PathVariable key: String,
         @RequestBody request: ApplyNamespaceManifestRequest,
         authentication: Authentication,
-    ): ManifestApplyResponse = service.apply(key, request, operatorPrincipal(authentication, key))
+    ): ManifestApplyResponse = service.apply(key, request, operatorPrincipal(authentication))
 
     @PostMapping("/{key}/cleanup")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -34,15 +34,10 @@ class NamespaceManifestController(
         @PathVariable key: String,
         @RequestBody request: ReleaseNamespaceManifestRequest,
         authentication: Authentication,
-    ) = service.release(key, request, operatorPrincipal(authentication, key))
+    ) = service.release(key, request, operatorPrincipal(authentication))
 
-    private fun operatorPrincipal(
-        authentication: Authentication,
-        key: String,
-    ): String {
+    private fun operatorPrincipal(authentication: Authentication): String {
         val jwt = authentication.principal as? Jwt ?: throw AccessDeniedException("Operator JWT required")
-        val keys = jwt.getClaimAsStringList("featurify_namespace_keys") ?: emptyList()
-        if (key !in keys) throw AccessDeniedException("Namespace is not granted to this operator")
         return jwt.subject ?: throw AccessDeniedException("JWT subject required")
     }
 }

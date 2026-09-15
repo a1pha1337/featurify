@@ -237,13 +237,10 @@ class NamespaceManifestDatabaseTests {
     }
 
     @Test
-    fun `operator endpoint requires scope and explicit namespace grant`() {
+    fun `operator endpoint requires scope and accepts any namespace key`() {
         val body = mapper.writeValueAsString(request())
 
-        fun call(
-            grantedKey: String,
-            scope: Boolean,
-        ): Int =
+        fun call(scope: Boolean): Int =
             mvc
                 .perform(
                     put("/api/v1/operator/namespaces/$key")
@@ -251,14 +248,13 @@ class NamespaceManifestDatabaseTests {
                         .content(body)
                         .with(
                             jwt()
-                                .jwt { it.subject("operator-subject").claim("featurify_namespace_keys", listOf(grantedKey)) }
+                                .jwt { it.subject("operator-subject") }
                                 .authorities(SimpleGrantedAuthority(if (scope) "SCOPE_featurify.operator" else "SCOPE_openid")),
                         ),
                 ).andReturn()
                 .response.status
-        assertThat(call(key, false)).isEqualTo(403)
-        assertThat(call("another-namespace", true)).isEqualTo(403)
-        assertThat(call(key, true)).isEqualTo(200)
+        assertThat(call(false)).isEqualTo(403)
+        assertThat(call(true)).isEqualTo(200)
         assertThat(values()).hasSize(1)
         val ordinaryWrite =
             mvc
@@ -268,7 +264,6 @@ class NamespaceManifestDatabaseTests {
                         .content(mapper.writeValueAsString(CreateNamespaceRequest("forbidden", "Forbidden")))
                         .with(
                             jwt()
-                                .jwt { it.claim("featurify_namespace_keys", listOf(key)) }
                                 .authorities(SimpleGrantedAuthority("SCOPE_featurify.operator")),
                         ),
                 ).andReturn()

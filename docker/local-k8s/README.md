@@ -80,10 +80,10 @@ docker compose -f docker-compose.k8s.yaml exec sandbox kubectl -n applications g
 обновите UI. Удалённая из манифеста фича исчезнет в Featurify. Для изменения значений
 через UI установите в YAML `valuePolicy: InitialOnly` и примените документ.
 
-Keycloak JWT оператора разрешает ключи Featurify `checkout` и `catalog`.
-Для других ключей расширьте claim `featurify_namespace_keys` в protocol mapper клиента
-`featurify-k8s-operator`. При первом запуске mapper создаётся автоматически. Realm import
-не перезаписывает существующий realm после перезапуска.
+Keycloak JWT оператора с scope `featurify.operator` может работать с любым ключом
+namespace, переданным в CR, кроме системного `default`. Предварительно добавлять ключи
+в claims не требуется. Realm import не перезаписывает существующий realm после
+перезапуска.
 
 Если kubectl установлен на хосте, можно использовать экспортированный kubeconfig:
 

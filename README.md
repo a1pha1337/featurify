@@ -175,10 +175,11 @@ Keycloak JWT и browser session сами по себе не дают досту�
 | gRPC `FeatureService`                                          | Namespace-токен в metadata `authorization` | Только чтение в namespace токена |
 
 Endpoints `/api/v1/operator/namespaces/{key}` (PUT) и `/{key}/cleanup` (POST)
-требуют Keycloak JWT со scope `featurify.operator` и claim `featurify_namespace_keys`,
-содержащим разрешённый ключ. Такие JWT не допускаются к остальным административным
-API. Секреты оператора не являются namespace-токенами; настройки client credentials
-описаны в README модуля оператора.
+требуют Keycloak JWT со scope `featurify.operator`. Оператор может работать с любым
+ключом namespace, переданным в манифесте, кроме системного `default`; предварительная
+регистрация ключей в claims не требуется. Такие JWT не допускаются к остальным
+административным API. Секреты оператора не являются namespace-токенами; настройки
+client credentials описаны в README модуля оператора.
 
 Namespace-токены не предоставляют административных прав и не сохраняются в HTTP-сессии.
 
