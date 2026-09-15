@@ -1,0 +1,141 @@
+@startuml featurify-architecture
+
+title Featurify — архитектура системы
+
+left to right direction
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam defaultFontName "Segoe UI"
+skinparam ArrowColor #52606D
+skinparam ComponentBorderColor #52606D
+skinparam PackageBorderColor #52606D
+skinparam DatabaseBorderColor #52606D
+skinparam CloudBorderColor #52606D
+skinparam NoteBorderColor #9AA5B1
+skinparam rectangle {
+    BackgroundColor #F8FAFC
+}
+skinparam package {
+    BackgroundColor #F8FAFC
+}
+skinparam node {
+    BackgroundColor #FFFFFF
+}
+
+legend right
+  |= Слой | Назначение |
+  | <color:#2563EB>синий</color> | внешний клиент или транспорт |
+  | <color:#16A34A>зелёный</color> | безопасность и авторизация |
+  | <color:#D97706>оранжевый</color> | хранилище и миграции |
+  Административный HTTP использует Keycloak JWT/OAuth2 session.
+  Публичный REST и gRPC используют namespace-токены.
+endlegend
+
+actor "Администратор" as admin #2563EB
+actor "Backend-приложение" as backend #2563EB
+actor "Kubernetes API / GitOps" as kubernetes #2563EB
+
+cloud "Keycloak\nOAuth2 / OIDC" as keycloak #E8F1FF
+database "PostgreSQL\nfeaturify database" as postgres #FFF4E5
+
+artifact "featurify-api\nREST DTO, validation, shared enums" as featurifyApi #E8F1FF
+
+node "Клиентская JVM" as clientJvm {
+    component "Feature-consuming backend\n(including featurify-demo)" as consumer #E8F1FF
+
+    package "Published Java 8 gRPC artifacts" as clientModules #F8FAFC {
+        artifact "featurify-grpc-starter\nSpring Boot auto-configuration" as grpcStarter #E8F1FF
+        artifact "featurify-grpc-client\nJava client, TLS, deadline, auth" as grpcClient #E8F1FF
+        artifact "featurify-grpc-api\n.proto + generated Java classes" as grpcApi #E8F1FF
+    }
+}
+
+node "Featurify JVM\nSpring Boot application" as featurifyJvm {
+    component "HTTP transport" as http #E8F1FF {
+        component "Vaadin UI" as vaadin #E8F1FF
+        component "Admin REST\nFeature / group / namespace / token" as adminRest #E8F1FF
+        component "Public REST\nread-only feature access" as publicRest #E8F1FF
+        component "Operator manifest REST" as operatorRest #E8F1FF
+    }
+
+    component "gRPC transport\nFeatureService :9090" as grpc #E8F1FF
+
+    package "Security boundary" as security #EAF7EE {
+        component "HTTP OAuth2 Resource Server\n+ browser OAuth2 Login" as oauth #EAF7EE
+        component "NamespaceTokenFilter\nBearer namespace token" as namespaceFilter #EAF7EE
+        component "TokenAuthenticationInterceptor\ngRPC metadata authorization" as grpcAuth #EAF7EE
+    }
+
+    package "Application layer" as application #F8FAFC {
+        component "FeatureToggleService\nadmin CRUD, groups, namespaces" as toggleService #F8FAFC
+        component "BackendFeatureService\npublic REST / gRPC reads" as backendService #F8FAFC
+        component "AccessTokenService\nissue / revoke namespace tokens" as tokenService #F8FAFC
+        component "NamespaceManifestService\noperator reconciliation" as manifestService #F8FAFC
+    }
+
+    package "Persistence layer" as persistence #FFF4E5 {
+        component "Spring Data JDBC repositories\nnamespace, feature, group, token, audit" as repositories #FFF4E5
+        component "Flyway migrations\nconstraints, indexes, triggers" as flyway #FFF4E5
+    }
+}
+
+node "Kubernetes cluster" as cluster {
+    component "featurify-k8s-operator\nJava Operator SDK reconciler" as operator #E8F1FF
+    artifact "FeaturifyNamespace CRD\n(namespace spec + status)" as crd #F8FAFC
+}
+
+' External entry points
+admin --> vaadin : browser HTTP(S)\nOAuth2 login
+admin --> adminRest : REST + Keycloak Bearer JWT
+backend --> consumer : application code
+consumer --> grpcStarter : auto-configures
+consumer --> publicRest : optional REST\nnamespace token
+consumer --> grpcClient : gRPC client API
+grpcStarter --> grpcClient : depends on
+grpcClient --> grpcApi : depends on
+grpcClient --> grpc : gRPC / HTTP2\nnamespace token
+
+kubernetes --> crd : apply / watch
+crd --> operator : reconcile events
+operator --> keycloak : client credentials\noperator JWT
+operator --> operatorRest : PUT / POST manifest\nKeycloak JWT + scope/grant
+
+' Featurify service internals
+vaadin --> oauth : authenticated UI session
+adminRest --> oauth : JWT / session
+operatorRest --> oauth : operator scope +\nnamespace grant
+publicRest --> namespaceFilter : namespace Bearer token
+grpc --> grpcAuth : authorization metadata
+oauth --> application : authorized request
+namespaceFilter --> application : authorized namespace
+grpcAuth --> application : authorized namespace
+
+toggleService --> repositories
+backendService --> repositories
+tokenService --> repositories
+manifestService --> repositories
+repositories --> postgres : current state\nno server-side config cache
+flyway --> postgres : schema bootstrap / upgrade
+oauth --> keycloak : issuer / JWKS
+keycloak --> postgres : identity / realm DB\n(local Compose deployment)
+
+' Build-time relationships
+http ..> application : delegates
+grpc ..> backendService : delegates
+featurifyJvm ..> grpcApi : generated contract
+featurifyJvm ..> featurifyApi : REST contract
+
+note right of security
+  Namespace isolation is enforced before reads:
+  the token resolves to a namespace UUID and
+  repository queries are scoped to that UUID.
+end note
+
+note bottom of postgres
+  Feature configuration, namespace access-token hashes,
+  feature audit history and manifest ownership/audit are persisted here.
+  Each request reads the current PostgreSQL state.
+end note
+
+@enduml
