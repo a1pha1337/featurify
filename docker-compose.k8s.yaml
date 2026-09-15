@@ -28,5 +28,12 @@ services:
       start_period: 15m
       retries: 8
 
+networks:
+  default:
+    name: featurify-k8s-local_default
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+
 volumes:
   kind-data:
