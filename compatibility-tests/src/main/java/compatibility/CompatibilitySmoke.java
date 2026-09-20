@@ -128,8 +128,9 @@ public class CompatibilitySmoke {
         expectStartupFailure(invalid);
         verifyTransport(false);
         verifyTransport(true);
+        ToggleCompatibility.verify();
         System.out.println("PASS Boot " + args[0] + " / Java " + System.getProperty("java.version")
-                + ": discovery, binding, overrides, disable, validation, cached services, default group, TTL, authenticated RPCs, TLS, deadline and shutdown");
+                + ": discovery, binding, overrides, disable, validation, cached services, default group, TTL, authenticated RPCs, TLS, deadline, shutdown and method toggles (JDK/CGLIB)");
     }
 
     private static void verifyTransport(boolean tls) throws Exception {

@@ -93,6 +93,12 @@ consumer --> grpcStarter : auto-configures
 consumer --> publicRest : optional REST\nnamespace token
 consumer --> grpcClient : gRPC client API
 grpcStarter --> grpcClient : depends on
+note top of grpcStarter
+  Method toggles: BOOLEAN / ENUM / VECTOR annotations.
+  Shared Spring AOP advisor gates public void bean methods.
+  Reads use the existing typed services and client TTL caches.
+  Java 8, Spring Boot 2 / 3 / 4; no AspectJ dependency.
+end note
 grpcClient --> grpcApi : depends on
 grpcClient --> grpc : gRPC / HTTP2\nnamespace token
 

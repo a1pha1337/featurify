@@ -19,9 +19,11 @@ dependencies {
     implementation("com.github.ben-manes.caffeine:caffeine:2.9.3")
     // Spring is provided by the host application. Never bring the server's Boot BOM into clients.
     compileOnly("org.springframework.boot:spring-boot-autoconfigure:2.0.9.RELEASE")
+    compileOnly("org.springframework:spring-aop:5.0.13.RELEASE")
     testImplementation(kotlin("stdlib"))
     testImplementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.1"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework:spring-tx")
     testImplementation("io.grpc:grpc-netty-shaded")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

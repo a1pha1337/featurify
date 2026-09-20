@@ -472,6 +472,39 @@ featurify:
 Сервисы потокобезопасны, кеши локальны для экземпляра сервиса. Caffeine 2.9.3 сохраняет
 поддержку Java 8; используются API, совместимые также с Caffeine 3.x в современных Boot.
 
+Стартер также позволяет условно выполнять методы Spring beans:
+
+```kotlin
+import org.springframework.stereotype.Service
+import ru.a1pha1337.featurify.client.annotation.BooleanFeatureToggle
+import ru.a1pha1337.featurify.client.annotation.EnumFeatureToggle
+import ru.a1pha1337.featurify.client.annotation.VectorFeatureToggle
+
+@Service
+class Notifications {
+    @BooleanFeatureToggle(name = "feature1")
+    fun sendNotification() { /* выполняется при true */ }
+
+    @EnumFeatureToggle(name = "provider", hasValue = "STRIPE", group = "checkout")
+    fun processPayment() { /* выполняется при точном совпадении */ }
+
+    @VectorFeatureToggle(name = "channels", element = "EMAIL", hasValue = true)
+    fun sendEmail() { /* выполняется при включённом EMAIL */ }
+}
+```
+
+Для Kotlin-классов в примере нужен плагин `kotlin-spring` (или явные `open` класс и методы).
+У BOOLEAN/VECTOR `hasValue` по умолчанию `true`; `false` инвертирует условие.
+Методы должны быть публичными, нестатическими, не `final`, возвращать `void` / обычный
+Kotlin `Unit`. Несовпадение значения пропускает тело метода. Ошибки RPC передаются
+без подмены значением `false`. Используются те же сервисы и кеши, что при явных вызовах.
+Неуказанная `group` использует группу сервиса по умолчанию, `group = ""` выбирает Global.
+Вызов должен проходить через Spring proxy: вызовы через `this` и объекты, созданные
+вручную, не перехватываются. PAYLOAD и несколько toggle-аннотаций на методе не поддерживаются.
+Аннотации подключаются автоматически; `featurify.grpc.enabled=false` отключает также
+их обработку. Подробности, ограничения и порядок с транзакциями/async:
+[аннотации методов](docs/method-toggles.md).
+
 Низкоуровневый клиент также доступен через constructor injection:
 
 ```kotlin

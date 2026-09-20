@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import ru.a1pha1337.featurify.client.FeaturifyClient;
 import ru.a1pha1337.featurify.client.GrpcFeaturifyClient;
 import ru.a1pha1337.featurify.client.service.BooleanFeatureService;
@@ -19,6 +20,7 @@ import java.io.InputStream;
 
 // No @AutoConfiguration or proxyBeanMethods: these are absent in early Boot 2 / Spring 5.
 @Configuration
+@Import(FeatureToggleConfiguration.class)
 @ConditionalOnClass(ManagedChannel.class)
 @ConditionalOnProperty(prefix = "featurify.grpc", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(FeaturifyGrpcProperties.class)
