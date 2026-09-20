@@ -19,4 +19,6 @@ data class PatchFeatureRequest(
         String,
         @NotNull Boolean,
     >? = null,
+    @field:Size(max = 65536)
+    val payloadValue: String? = null,
 )

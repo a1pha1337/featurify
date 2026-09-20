@@ -15,6 +15,10 @@ spec:
     - key: new-checkout
       type: BOOLEAN
       booleanValue: false
+    - key: checkout-config
+      type: PAYLOAD
+      payloadValue: |
+        {"timeoutMs":1500,"theme":{"accent":"blue"},"methods":["card","wire"]}
   groups:
     - key: payments
       displayName: Payments

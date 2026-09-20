@@ -22,5 +22,6 @@ data class Feature(
             is BooleanValue -> current.enabled.toString()
             is EnumValue -> current.selected
             is VectorValue -> JsonMapper().writeValueAsString(current.elements.toSortedMap())
+            is PayloadValue -> current.json
         }
 }

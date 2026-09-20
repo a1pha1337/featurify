@@ -11,6 +11,7 @@ service FeatureService {
   rpc GetBooleanFeature(GetFeatureRequest) returns (BooleanFeatureResponse);
   rpc GetVectorFeature(GetVectorFeatureRequest) returns (BooleanFeatureResponse);
   rpc GetEnumFeature(GetFeatureRequest) returns (EnumFeatureResponse);
+  rpc GetPayloadFeature(GetFeatureRequest) returns (PayloadFeatureResponse);
 }
 message GetFeatureRequest {
   // Group key, not display name. Empty means Global.
@@ -22,6 +23,12 @@ message BooleanFeatureResponse {
   int64 version = 2;
 }
 message EnumFeatureResponse {
+  string value = 1;
+  int64 version = 2;
+}
+
+message PayloadFeatureResponse {
+  // Complete JSON document, including objects, arrays, scalars and JSON null.
   string value = 1;
   int64 version = 2;
 }

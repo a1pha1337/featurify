@@ -20,6 +20,7 @@ import ru.a1pha1337.featurify.domain.EnumValue
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.FeatureValue
+import ru.a1pha1337.featurify.domain.PayloadValue
 import ru.a1pha1337.featurify.domain.VectorValue
 import java.time.Instant
 import java.util.UUID
@@ -40,6 +41,7 @@ class TypedFeatureDatabaseTests {
             FeatureType.BOOLEAN -> BooleanValue(false)
             FeatureType.ENUM -> EnumValue("DOG", listOf("CAT", "DOG"))
             FeatureType.VECTOR -> VectorValue(mapOf("CAT" to true, "DOG" to false))
+            FeatureType.PAYLOAD -> PayloadValue("""{"nested":[1,true,null]}""")
         }
 
     private fun feature(type: FeatureType): Feature =
@@ -68,6 +70,7 @@ class TypedFeatureDatabaseTests {
             FeatureType.BOOLEAN -> "feature_boolean_value"
             FeatureType.ENUM -> "feature_enum_value"
             FeatureType.VECTOR -> "feature_vector_element"
+            FeatureType.PAYLOAD -> "feature_payload_value"
         }
 
     @ParameterizedTest
@@ -103,6 +106,7 @@ class TypedFeatureDatabaseTests {
                     is BooleanValue -> current.copy(enabled = true)
                     is EnumValue -> current.copy(selected = "CAT")
                     is VectorValue -> current.copy(elements = current.elements + ("DOG" to true))
+                    is PayloadValue -> PayloadValue("null")
                 }
             val updated = features.save(original.copy(value = next))
             assertThat(updated.version).isGreaterThan(original.version!!)
@@ -123,6 +127,14 @@ class TypedFeatureDatabaseTests {
                 String::class.java,
             )
         assertThat(columns).doesNotContain("boolean_value", "enum_value", "vector_value")
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["{", "{} []", "{\"a\":1,\"a\":2}"])
+    fun `database rejects invalid payload JSON`(json: String) {
+        val saved = features.save(feature(FeatureType.PAYLOAD))
+        assertThatThrownBy { jdbc.update("update feature_payload_value set value = ? where feature_id = ?", json, saved.id) }
+            .isInstanceOf(DataIntegrityViolationException::class.java)
     }
 
     @ParameterizedTest

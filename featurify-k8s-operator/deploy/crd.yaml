@@ -99,13 +99,18 @@ spec:
                         pattern: '^[A-Za-z][A-Za-z0-9]*([.-][A-Za-z0-9]+)*$'
                       type:
                         type: string
-                        enum: [BOOLEAN, ENUM, VECTOR]
+                        enum: [BOOLEAN, ENUM, VECTOR, PAYLOAD]
                       description:
                         type: string
                         maxLength: 2000
                         default: ''
                       booleanValue:
                         type: boolean
+                      payloadValue:
+                        type: string
+                        minLength: 1
+                        maxLength: 65536
+                        description: Complete JSON document, validated by Featurify. Updates replace the whole document.
                       enumValue:
                         type: string
                         minLength: 1
@@ -126,6 +131,8 @@ spec:
                         additionalProperties:
                           type: boolean
                     x-kubernetes-validations:
+                      - rule: "self.type == 'PAYLOAD' ? has(self.payloadValue) : !has(self.payloadValue)"
+                        message: payloadValue is required only for PAYLOAD
                       - rule: "self.type == 'BOOLEAN' ? has(self.booleanValue) : !has(self.booleanValue)"
                         message: booleanValue is required only for BOOLEAN
                       - rule: "self.type == 'ENUM' ? (has(self.enumValue) && has(self.enumOptions) && size(self.enumOptions) > 0) : (!has(self.enumValue) && !has(self.enumOptions))"

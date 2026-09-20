@@ -9,12 +9,14 @@ import org.springframework.grpc.server.service.GrpcService
 import ru.a1pha1337.featurify.domain.BooleanValue
 import ru.a1pha1337.featurify.domain.EnumValue
 import ru.a1pha1337.featurify.domain.FeatureType
+import ru.a1pha1337.featurify.domain.PayloadValue
 import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
 import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest
+import ru.a1pha1337.featurify.grpc.proto.PayloadFeatureResponse
 import ru.a1pha1337.featurify.service.BackendFeatureService
 import ru.a1pha1337.featurify.service.DomainValidationException
 import ru.a1pha1337.featurify.service.NotFoundException
@@ -76,6 +78,21 @@ class FeatureGrpcService(
         BooleanFeatureResponse
             .newBuilder()
             .setValue(element)
+            .setVersion(feature.version ?: 0)
+            .build()
+    }
+
+    override fun getPayloadFeature(
+        request: GetFeatureRequest,
+        observer: StreamObserver<PayloadFeatureResponse>,
+    ) = respond(observer) {
+        val feature = features.get(requireNamespace(), request.group, request.key)
+        if (feature.type != FeatureType.PAYLOAD) {
+            throw GrpcErrors.exception(Status.FAILED_PRECONDITION, "FEATURE_TYPE_MISMATCH", "Feature is not PAYLOAD")
+        }
+        PayloadFeatureResponse
+            .newBuilder()
+            .setValue((feature.value as PayloadValue).json)
             .setVersion(feature.version ?: 0)
             .build()
     }

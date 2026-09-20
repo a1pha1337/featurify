@@ -52,6 +52,8 @@ class NamespaceManifestDatabaseTests {
 
     @Autowired private lateinit var bindings: ManifestRepository
 
+    @Autowired private lateinit var tokens: ru.a1pha1337.featurify.service.AccessTokenService
+
     private val key = "operator-test-${UUID.randomUUID()}"
     private val owner = ManifestOwner("test-cluster", UUID.randomUUID().toString(), "applications", "checkout")
     private val boolean = CreateFeatureRequest("enabled", FeatureType.BOOLEAN, booleanValue = false)
@@ -98,6 +100,137 @@ class NamespaceManifestDatabaseTests {
         assertThat(manual.history(key, "enabled", null)).hasSize(1)
         service.apply(key, changed.copy(generation = 3, spec = changed.spec.copy(features = emptyList())), "operator-subject")
         assertThat(values()).isEmpty()
+    }
+
+    @Test
+    fun `payload REST creates structured values replaces JSON and returns validation problems`() {
+        manual.createNamespace(CreateNamespaceRequest(key, "Payload REST"))
+        val definition =
+            CreateFeatureRequest("config", FeatureType.PAYLOAD, payloadValue = """{"large":12345678901234567890,"nested":[true,null]}""")
+        val created =
+            mvc
+                .perform(
+                    post("/api/v1/features")
+                        .param("namespace", key)
+                        .with(jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(definition)),
+                ).andReturn()
+                .response
+        assertThat(created.status).isEqualTo(201)
+        assertThat(created.contentAsString).contains("12345678901234567890")
+        val parsed = mapper.readTree(created.contentAsString)
+        assertThat(parsed.at("/value/nested/0").asBoolean()).isTrue()
+        assertThat(parsed.at("/value/nested/1").isNull).isTrue()
+        val token =
+            tokens
+                .create(
+                    key,
+                    ru.a1pha1337.featurify.dto
+                        .CreateAccessTokenRequest("payload-reader"),
+                ).token
+        val read =
+            mvc
+                .perform(
+                    org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/v1/features/config")
+                        .header("Authorization", "Bearer $token"),
+                ).andReturn()
+                .response
+        assertThat(read.status).isEqualTo(200)
+        assertThat(mapper.readTree(read.contentAsString).at("/value")).isEqualTo(parsed.at("/value"))
+        val forbidden =
+            mvc
+                .perform(
+                    org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/v1/features/config")
+                        .param("namespace", "default")
+                        .header("Authorization", "Bearer $token"),
+                ).andReturn()
+                .response
+        assertThat(forbidden.status).isEqualTo(403)
+        val version = parsed.at("/version").asLong()
+        val invalid =
+            mvc
+                .perform(
+                    org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/v1/features/config")
+                        .param("namespace", key)
+                        .with(jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(PatchFeatureRequest(version, payloadValue = "{"))),
+                ).andReturn()
+                .response
+        assertThat(invalid.status).isEqualTo(400)
+        assertThat(invalid.contentType).startsWith("application/problem+json")
+        assertThat(mapper.readTree(invalid.contentAsString).at("/details/0/field").asString()).isEqualTo("payloadValue")
+        val updated =
+            mvc
+                .perform(
+                    org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/v1/features/config")
+                        .param("namespace", key)
+                        .with(jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(PatchFeatureRequest(version, payloadValue = "null"))),
+                ).andReturn()
+                .response
+        assertThat(updated.status).isEqualTo(200)
+        assertThat(mapper.readTree(updated.contentAsString).at("/value").isNull).isTrue()
+        assertThat(manual.history(key, "config", null)).hasSize(1)
+    }
+
+    @Test
+    fun `payload reconciles atomically preserves initial only edits and audits replacements`() {
+        val definition = CreateFeatureRequest("config", FeatureType.PAYLOAD, payloadValue = """{"b":2,"a":1}""")
+        val initial = request().let { it.copy(spec = it.spec.copy(features = listOf(definition))) }
+        service.apply(key, initial, "operator-subject")
+        val version = values().single().version
+        assertThat(values().single().value.toString()).isEqualTo("""{"a":1,"b":2}""")
+        assertThatThrownBy { manual.patchFeature(key, "config", null, PatchFeatureRequest(version, payloadValue = "{}")) }
+            .isInstanceOf(ConflictException::class.java)
+        val reordered =
+            initial.copy(
+                generation = 2,
+                spec = initial.spec.copy(features = listOf(definition.copy(payloadValue = """{ "a":1, "b":2 }"""))),
+            )
+        service.apply(key, reordered, "operator-subject")
+        assertThat(values().single().version).isEqualTo(version)
+        assertThat(manual.history(key, "config", null)).isEmpty()
+
+        val runtime =
+            reordered.copy(
+                generation = 3,
+                spec = reordered.spec.copy(management = ManifestManagement(valuePolicy = ValuePolicy.InitialOnly)),
+            )
+        service.apply(key, runtime, "operator-subject")
+        val edited = manual.patchFeature(key, "config", null, PatchFeatureRequest(version, payloadValue = "[true,null]"))
+        assertThat(service.apply(key, runtime, "operator-subject").changed).isFalse()
+        assertThat(values().single().value.toString()).isEqualTo("[true,null]")
+        assertThat(values().single().version).isEqualTo(edited.version)
+        assertThat(manual.history(key, "config", null)).hasSize(1)
+
+        val invalid =
+            initial.copy(
+                generation = 4,
+                spec = initial.spec.copy(features = listOf(boolean, definition.copy(payloadValue = "{"))),
+            )
+        assertThatThrownBy { service.apply(key, invalid, "operator-subject") }
+            .isInstanceOf(ru.a1pha1337.featurify.service.DomainValidationException::class.java)
+        assertThat(values()).hasSize(1)
+        assertThat(values().single().value.toString()).isEqualTo("[true,null]")
+        service.apply(key, initial.copy(generation = 5), "operator-subject")
+        assertThat(values().single().value.toString()).isEqualTo("""{"a":1,"b":2}""")
+        assertThat(manual.history(key, "config", null)).hasSize(2)
+        service.apply(key, initial.copy(generation = 6, spec = initial.spec.copy(features = emptyList())), "operator-subject")
+        assertThat(values()).isEmpty()
+        assertThat(
+            jdbc.queryForObject(
+                "select count(*) from feature_payload_value p join feature f on f.id = p.feature_id join namespace n on n.id = f.namespace_id where n.key = ?",
+                Long::class.java,
+                key,
+            ),
+        ).isZero()
     }
 
     @Test

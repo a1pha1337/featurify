@@ -337,6 +337,59 @@ class MainViewTests {
             .containsExactly("false", "false", "false")
     }
 
+    @Test
+    fun `payload creates without enum options and edits complete JSON`() {
+        button(view, "New feature").click()
+        val create = dialog()
+        field(create, "Key").value = "config"
+        combo(create, "Type").value = FeatureType.PAYLOAD
+        val json = components(create).filterIsInstance<com.vaadin.flow.component.textfield.TextArea>().single { it.label == "JSON value" }
+        assertThat(json.isVisible).isTrue()
+        json.value = "{\"timeout\":30}"
+        every { service.createFeature(eq("blue"), any()) } returns feature
+        button(create, "Create").click()
+        verify {
+            service.createFeature(
+                "blue",
+                match {
+                    it.type == FeatureType.PAYLOAD &&
+                        it.payloadValue == json.value &&
+                        it.enumOptions.isEmpty()
+                },
+            )
+        }
+        assertThat(create.isOpened).isFalse()
+
+        feature =
+            feature.copy(
+                type = FeatureType.PAYLOAD,
+                value =
+                    ru.a1pha1337.featurify.domain
+                        .PayloadValue(json.value)
+                        .publicValue(),
+            )
+        assertThat((valueEditor() as com.vaadin.flow.component.textfield.TextArea).value).isEqualTo(json.value)
+        grid().select(feature)
+        button(view, "Edit").click()
+        val edit = dialog()
+        val editor = components(edit).filterIsInstance<com.vaadin.flow.component.textfield.TextArea>().single { it.label == "JSON value" }
+        editor.value = "[true,null]"
+        every { service.editFeature(eq("blue"), any(), any(), any(), any()) } returns feature
+        button(edit, "Save").click()
+        verify {
+            service.editFeature(
+                "blue",
+                feature.key,
+                feature.group,
+                feature.group,
+                match {
+                    it.payloadValue == "[true,null]" &&
+                        it.version == 7L
+                },
+            )
+        }
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun valueEditor(): Component =
         (grid().getColumnByKey("value").renderer as com.vaadin.flow.data.renderer.ComponentRenderer<Component, AdminFeatureResponse>)

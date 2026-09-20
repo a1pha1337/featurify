@@ -13,6 +13,7 @@ import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.FeatureValue
 import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.domain.PayloadValue
 import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.dto.ApplyNamespaceManifestRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
@@ -324,6 +325,7 @@ class NamespaceManifestService(
             if (current != null && current.type != definition.type) conflict("Feature type is immutable")
             val initialOnly = policy == ValuePolicy.InitialOnly
             return when (definition.type) {
+                FeatureType.PAYLOAD -> if (initialOnly && current != null) current else PayloadValue(checkNotNull(definition.payloadValue))
                 FeatureType.BOOLEAN -> if (initialOnly && current != null) current else BooleanValue(checkNotNull(definition.booleanValue))
                 FeatureType.ENUM -> {
                     val selected = if (initialOnly && current is EnumValue) current.selected else checkNotNull(definition.enumValue)

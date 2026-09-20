@@ -57,6 +57,8 @@ class HttpManifestClientTests {
             assertThat(bodies.get(1)).isEqualTo(bodies.get(0));
             assertThat(bodies.get(0).at("/owner/uid").asText()).isEqualTo("test-uid");
             assertThat(bodies.get(0).at("/spec/groups/0/features/1/vectorValues/CASH").asBoolean()).isFalse();
+            assertThat(bodies.get(0).at("/spec/features/1/type").asText()).isEqualTo("PAYLOAD");
+            assertThat(bodies.get(0).at("/spec/features/1/payloadValue").asText()).contains("\"timeoutMs\":1500");
             assertThat(bodies.get(2).path("deletionPolicy").asText()).isEqualTo("Retain");
         } finally {
             server.stop(0);

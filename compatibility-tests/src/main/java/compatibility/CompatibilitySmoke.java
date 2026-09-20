@@ -19,9 +19,11 @@ import ru.a1pha1337.featurify.client.FeaturifyClient;
 import ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties;
 import ru.a1pha1337.featurify.client.service.BooleanFeatureService;
 import ru.a1pha1337.featurify.client.service.EnumFeatureService;
+import ru.a1pha1337.featurify.client.service.PayloadFeatureService;
 import ru.a1pha1337.featurify.client.service.VectorFeatureService;
 import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse;
 import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse;
+import ru.a1pha1337.featurify.grpc.proto.PayloadFeatureResponse;
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc;
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest;
 import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest;
@@ -155,6 +157,11 @@ public class CompatibilitySmoke {
                 observer.onCompleted();
             }
 
+            public void getPayloadFeature(GetFeatureRequest request, StreamObserver<PayloadFeatureResponse> observer) {
+                observer.onNext(PayloadFeatureResponse.newBuilder().setValue("{\"enabled\":false}").setVersion(45).build());
+                observer.onCompleted();
+            }
+
             public void getVectorFeature(GetVectorFeatureRequest request, StreamObserver<BooleanFeatureResponse> observer) {
                 observer.onNext(BooleanFeatureResponse.newBuilder().setValue("DOG".equals(request.getElement())).setVersion(44).build());
                 observer.onCompleted();
@@ -185,6 +192,10 @@ public class CompatibilitySmoke {
                 check(client.getBooleanFeature("enabled").getVersion() == 42, "Boolean response lost version");
                 check("checkout".equals(client.getEnumFeature("color", "checkout").getValue()), "Group lost");
                 check(client.getVectorFeature("animals", "DOG").getValue(), "Vector request failed");
+                check(client.getPayloadFeature("config").getVersion() == 45, "Payload response lost version");
+                PayloadFeatureService payloads = context.getBean(PayloadFeatureService.class);
+                check("{\"enabled\":false}".equals(payloads.getValue("config")), "Payload JSON lost");
+                check(payloads.getFeature("config") == payloads.getFeature("config", null), "Payload cache missed");
                 try {
                     client.getBooleanFeature("slow");
                     throw new AssertionError("Deadline not enforced");
@@ -200,7 +211,7 @@ public class CompatibilitySmoke {
             } catch (StatusRuntimeException error) {
                 check(error.getStatus().getCode() == Status.Code.UNAVAILABLE, "Wrong shutdown status");
             }
-            check(authenticatedCalls.get() == 16, "Authentication or unexpected retries: " + authenticatedCalls.get());
+            check(authenticatedCalls.get() == 18, "Authentication or unexpected retries: " + authenticatedCalls.get());
             settings.put("featurify.grpc.default-group", "checkout");
             try (AnnotationConfigApplicationContext context = context(settings, false)) {
                 check("checkout".equals(context.getBean(FeaturifyGrpcProperties.class).getDefaultGroup()), "Default group binding failed");
@@ -216,7 +227,7 @@ public class CompatibilitySmoke {
                 check(enums.getFeature("grouped", null) == enums.getFeature("grouped", ""), "Global group cache mismatch");
                 vectors.isEnabled("grouped", "DOG");
                 check(vectors.getFeature("grouped", "DOG") == vectors.getFeature("grouped", "DOG", "checkout"), "Vector default group ignored");
-                check(authenticatedCalls.get() == 21, "Default group cache keys differ from explicit group");
+                check(authenticatedCalls.get() == 23, "Default group cache keys differ from explicit group");
             }
         } finally {
             server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);

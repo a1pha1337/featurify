@@ -52,8 +52,9 @@ namespace-токен и не требуют отдельной HTTP-автори
 | `GET /diagnostics/features/boolean/{key}` | Boolean-фича |
 | `GET /diagnostics/features/enum/{key}` | Значение enum-фичи |
 | `GET /diagnostics/features/vector/{key}/{element}` | Состояние элемента vector |
+| `GET /diagnostics/features/payload/{key}` | JSON-документ payload-фичи |
 
-Для трёх ручек чтения доступны query-параметры:
+Для четырёх ручек чтения доступны query-параметры:
 
 - `group=checkout` — конкретная группа; без параметра применяется `defaultGroup`;
 - `group=` — явно выбрать Global, даже при настроенной группе по умолчанию;
@@ -68,6 +69,7 @@ curl "http://localhost:8082/diagnostics/client"
 curl "http://localhost:8082/diagnostics/features/boolean/enabled?group=checkout"
 curl "http://localhost:8082/diagnostics/features/enum/provider?group=checkout&cached=false"
 curl "http://localhost:8082/diagnostics/features/vector/animals/DOG?group="
+curl "http://localhost:8082/diagnostics/features/payload/checkout-config?cached=false"
 ```
 
 В PowerShell при необходимости используйте `curl.exe`. Создайте эти фичи в namespace
@@ -93,6 +95,7 @@ curl "http://localhost:8082/diagnostics/features/vector/animals/DOG?group="
 в кеш. Чтобы увидеть эффект TTL, повторите чтение после изменения фичи на сервере
 и сравните его с `cached=false`. Прямое чтение не обновляет кеш сервисов.
 `group: null` в ответе означает Global.
+Для `PAYLOAD` поле `value` содержит строку с JSON-документом, как в gRPC-клиенте.
 
 При ошибке возвращается `application/problem+json` с `grpcCode` и описанием ошибки:
 `INVALID_ARGUMENT` → 400, `UNAUTHENTICATED` → 401, `PERMISSION_DENIED` → 403,
@@ -122,6 +125,6 @@ Demo подключается к `app:9090` и публикует HTTP толь�
 ```
 
 Интеграционные тесты запускают HTTP-приложение и настоящий локальный gRPC-сервер
-на случайных портах. Проверяются Bearer-токен, три типа фич, группы, обход кеша,
+на случайных портах. Проверяются Bearer-токен, четыре типа фич, группы, обход кеша,
 ошибки, deadline и отсутствие токена в диагностике. Внешние сервисы не нужны.
 Исполняемый JAR: `featurify-demo/build/libs/featurify-demo-0.0.1-SNAPSHOT.jar`.

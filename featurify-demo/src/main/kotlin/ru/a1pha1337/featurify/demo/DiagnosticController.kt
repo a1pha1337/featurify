@@ -9,6 +9,7 @@ import ru.a1pha1337.featurify.client.FeaturifyClient
 import ru.a1pha1337.featurify.client.autoconfigure.FeaturifyGrpcProperties
 import ru.a1pha1337.featurify.client.service.BooleanFeatureService
 import ru.a1pha1337.featurify.client.service.EnumFeatureService
+import ru.a1pha1337.featurify.client.service.PayloadFeatureService
 import ru.a1pha1337.featurify.client.service.VectorFeatureService
 
 @RestController
@@ -19,6 +20,7 @@ class DiagnosticController(
     private val enums: EnumFeatureService,
     private val vectors: VectorFeatureService,
     private val properties: FeaturifyGrpcProperties,
+    private val payloads: PayloadFeatureService,
 ) {
     @GetMapping("/client")
     fun client(): ClientDiagnostic =
@@ -69,6 +71,17 @@ class DiagnosticController(
                 } else {
                     client.getVectorFeature(key, element, resolvedGroup)
                 }
+            response.value to response.version
+        }
+
+    @GetMapping("/features/payload/{key}")
+    fun payloadFeature(
+        @PathVariable key: String,
+        @RequestParam(required = false) group: String?,
+        @RequestParam(defaultValue = "true") cached: Boolean,
+    ): FeatureDiagnostic<String> =
+        diagnose("PAYLOAD", key, group, null, cached) { resolvedGroup ->
+            val response = if (cached) payloads.getFeature(key, resolvedGroup) else client.getPayloadFeature(key, resolvedGroup)
             response.value to response.version
         }
 

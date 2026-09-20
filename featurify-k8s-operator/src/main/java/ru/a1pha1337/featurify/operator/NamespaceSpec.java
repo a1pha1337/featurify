@@ -14,7 +14,7 @@ public record NamespaceSpec(String key, String displayName, Management managemen
     public enum OwnershipPolicy { Exclusive, Shared }
     public enum ValuePolicy { Managed, InitialOnly }
     public enum DeletionPolicy { Retain, Delete }
-    public enum FeatureType { BOOLEAN, ENUM, VECTOR }
+    public enum FeatureType { BOOLEAN, ENUM, VECTOR, PAYLOAD }
 
     public record Management(OwnershipPolicy ownershipPolicy, ValuePolicy valuePolicy,
                              DeletionPolicy deletionPolicy, boolean adoptExisting) {
@@ -32,7 +32,8 @@ public record NamespaceSpec(String key, String displayName, Management managemen
     }
 
     public record Feature(String key, FeatureType type, String description, Boolean booleanValue,
-                          String enumValue, List<String> enumOptions, Map<String, Boolean> vectorValues) {
+                          String enumValue, List<String> enumOptions, Map<String, Boolean> vectorValues,
+                          String payloadValue) {
         public Feature {
             description = description == null ? "" : description;
             enumOptions = enumOptions == null ? List.of() : List.copyOf(enumOptions);

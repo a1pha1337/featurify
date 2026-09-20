@@ -19,6 +19,7 @@ import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
 import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest
+import ru.a1pha1337.featurify.grpc.proto.PayloadFeatureResponse
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import java.net.URI
@@ -81,7 +82,7 @@ class DiagnosticHttpTests {
 
     @Test
     fun `cached false bypasses the service cache for every feature type`() {
-        for (path in listOf("boolean/cache-boolean", "enum/cache-enum", "vector/cache-vector/DOG")) {
+        for (path in listOf("boolean/cache-boolean", "enum/cache-enum", "vector/cache-vector/DOG", "payload/cache-payload")) {
             val url = "/diagnostics/features/$path"
             val initial = body(url)["version"].asLong()
             assertThat(body(url)["version"].asLong()).isEqualTo(initial)
@@ -234,6 +235,22 @@ class DiagnosticHttpTests {
                                     .newBuilder()
                                     .setValue(request.element == "DOG")
                                     .setVersion(version.incrementAndGet())
+                                    .build(),
+                            )
+                            observer.onCompleted()
+                        }
+
+                        override fun getPayloadFeature(
+                            request: GetFeatureRequest,
+                            observer: StreamObserver<PayloadFeatureResponse>,
+                        ) {
+                            requests.add("payload:${request.key}:${request.group}")
+                            observer.onNext(
+                                PayloadFeatureResponse
+                                    .newBuilder()
+                                    .setValue(
+                                        "{\"enabled\":true}",
+                                    ).setVersion(version.incrementAndGet())
                                     .build(),
                             )
                             observer.onCompleted()

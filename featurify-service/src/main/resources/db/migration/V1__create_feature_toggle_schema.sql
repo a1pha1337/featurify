@@ -87,7 +87,7 @@ CREATE TABLE feature
     CONSTRAINT fk_feature_group_namespace FOREIGN KEY (group_id, namespace_id)
         REFERENCES feature_group (id, namespace_id) ON DELETE CASCADE,
     CONSTRAINT ck_feature_key CHECK (key ~ '^[A-Za-z]([A-Za-z0-9]|[.-][A-Za-z0-9])*$'),
-    CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM', 'VECTOR')),
+    CONSTRAINT ck_feature_type CHECK (type IN ('BOOLEAN', 'ENUM', 'VECTOR', 'PAYLOAD')),
     CONSTRAINT uq_feature_id_type UNIQUE (id, type)
 );
 
@@ -150,6 +150,16 @@ CREATE TABLE feature_vector_element
     CONSTRAINT ck_vector_element_name CHECK (length(trim(element)) > 0 AND element = trim(element))
 );
 
+CREATE TABLE feature_payload_value
+(
+    feature_id UUID PRIMARY KEY,
+    feature_type VARCHAR(16) GENERATED ALWAYS AS ('PAYLOAD') STORED,
+    value TEXT NOT NULL,
+    CONSTRAINT fk_payload_feature_type FOREIGN KEY (feature_id, feature_type)
+        REFERENCES feature (id, type) ON DELETE CASCADE,
+    CONSTRAINT ck_payload_json CHECK (length(value) BETWEEN 1 AND 65536 AND value IS JSON WITH UNIQUE KEYS)
+);
+
 -- JDBC writes the parent and its children in separate statements. Enforce complete
 -- typed values at transaction end, allowing atomic replacement of child rows.
 CREATE FUNCTION check_feature_value(target_id UUID)
@@ -169,6 +179,8 @@ BEGIN
         RAISE EXCEPTION 'BOOLEAN feature requires a value' USING ERRCODE = '23514';
     ELSIF target_type = 'ENUM' AND NOT EXISTS (SELECT 1 FROM feature_enum_value WHERE feature_id = target_id) THEN
         RAISE EXCEPTION 'ENUM feature requires a selected value' USING ERRCODE = '23514';
+    ELSIF target_type = 'PAYLOAD' AND NOT EXISTS (SELECT 1 FROM feature_payload_value WHERE feature_id = target_id) THEN
+        RAISE EXCEPTION 'PAYLOAD feature requires a JSON value' USING ERRCODE = '23514';
     ELSIF target_type = 'VECTOR' THEN
         SELECT count(*) INTO element_count FROM feature_vector_element WHERE feature_id = target_id;
         IF element_count NOT BETWEEN 1 AND 100 THEN
@@ -213,6 +225,9 @@ CREATE CONSTRAINT TRIGGER trg_enum_value_required
     FOR EACH ROW EXECUTE FUNCTION enforce_feature_value();
 CREATE CONSTRAINT TRIGGER trg_vector_value_required
     AFTER INSERT OR UPDATE OR DELETE ON feature_vector_element DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION enforce_feature_value();
+CREATE CONSTRAINT TRIGGER trg_payload_value_required
+    AFTER INSERT OR UPDATE OR DELETE ON feature_payload_value DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW EXECUTE FUNCTION enforce_feature_value();
 
 CREATE TABLE feature_audit_log

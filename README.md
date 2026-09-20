@@ -11,7 +11,7 @@
 
 ## Что реализовано
 
-- типы `BOOLEAN`, `ENUM` и `VECTOR` (vectorToggle с независимым состоянием элементов);
+- типы `BOOLEAN`, `ENUM`, `VECTOR` (независимые состояния элементов) и `PAYLOAD` (JSON-конфигурация);
 - независимые ключи и значения в каждом namespace'е;
 - read-only REST API для бекендов с namespace-токенами;
 - административный REST API и Vaadin UI;
@@ -53,7 +53,7 @@
 SQL-миграция находится в `featurify-service/src/main/resources/db/migration`.
 
 Для проверки клиента через HTTP запустите [featurify-demo](featurify-demo/README.md).
-Demo слушает `127.0.0.1:8082`, поддерживает чтение boolean/enum/vector с кешем или напрямую
+Demo слушает `127.0.0.1:8082`, поддерживает чтение boolean/enum/vector/payload с кешем или напрямую
 и запускается через `:featurify-demo:bootRun` либо Compose-профиль `demo`.
 
 В исходной постановке одновременно указаны Liquibase и Flyway. Использован Flyway, потому что требование создать именно
@@ -113,6 +113,8 @@ docker compose ps
 - При создании `VECTOR` добавьте имена в `Elements` и выберите включённые в `Enabled elements`.
   Остальные элементы создаются выключенными. В таблице у каждого элемента своя кнопка,
   а в `Edit` можно изменить несколько состояний одновременно.
+- Для `PAYLOAD` введите JSON в поле `JSON value`. В таблице документ доступен для чтения,
+  в `Edit` — для полной замены с проверкой версии и аудитом.
 - `Delete` полностью удаляет выбранную фичу, её enum-опции, vector-элементы и историю.
 - `Manage groups` позволяет удалить группу вместе со всеми её фичами.
 - `Delete namespace` удаляет namespace, все его группы и фичи, включая `Global`.
@@ -316,10 +318,11 @@ graceful shutdown — 5 секунд, максимальный размер вх
 ```text
 featurify.v1.FeatureService/GetBooleanFeature
 featurify.v1.FeatureService/GetEnumFeature
+featurify.v1.FeatureService/GetPayloadFeature
 featurify.v1.FeatureService/GetVectorFeature
 ```
 
-BOOLEAN и ENUM методы принимают `{"group":"checkout","key":"enabled"}`. `group` — ключ группы,
+BOOLEAN, ENUM и PAYLOAD методы принимают `{"group":"checkout","key":"enabled"}`. `group` — ключ группы,
 не display name; пустая или пропущенная группа означает `Global`. Namespace в запросе
 отсутствует и определяется только токеном. Ответ содержит типизированное `value`
 (`bool` или `string`) и `version`.
@@ -418,22 +421,25 @@ featurify:
 ```
 
 Токен передаётся без префикса `Bearer`; namespace определяется токеном.
-Для клиентского кода стартер предоставляет три сервиса с кешированием ответов:
+Для клиентского кода стартер предоставляет четыре сервиса с кешированием ответов:
 
 ```kotlin
 import org.springframework.stereotype.Service
 import ru.a1pha1337.featurify.client.service.BooleanFeatureService
 import ru.a1pha1337.featurify.client.service.EnumFeatureService
+import ru.a1pha1337.featurify.client.service.PayloadFeatureService
 import ru.a1pha1337.featurify.client.service.VectorFeatureService
 
 @Service
 class CheckoutFeatures(
     private val booleans: BooleanFeatureService,
     private val enums: EnumFeatureService,
+    private val payloads: PayloadFeatureService,
     private val vectors: VectorFeatureService,
 ) {
     fun enabled(): Boolean = booleans.isEnabled("enabled", "checkout")
     fun provider(): String = enums.getValue("provider", "checkout")
+    fun config(): String = payloads.getValue("checkout-config")
     fun dogEnabled(): Boolean = vectors.isEnabled("animals", "DOG")
     fun version(): Long = booleans.getFeature("enabled", "checkout").version
 }
@@ -444,7 +450,7 @@ class CheckoutFeatures(
 (`defaultGroup` в `FeaturifyGrpcProperties`): по умолчанию `null`, то есть Global.
 Например, при `featurify.grpc.default-group: checkout` вызов `booleans.isEnabled("enabled")`
 читает фичу из `checkout`. Это также относится к `enums.getValue(...)`,
-`vectors.isEnabled(...)` и `getFeature(...)` без аргумента группы.
+`vectors.isEnabled(...)`, `payloads.getValue(...)` и `getFeature(...)` без аргумента группы.
 Явно переданная группа имеет приоритет; явные `null` и `""` выбирают Global.
 Кеш Caffeine хранит успешные ответы, включая
 `false` и пустую строку, по типу фичи, ключу, группе и элементу vector. `null` и пустая
@@ -563,7 +569,7 @@ JDK на Ubuntu для совместимости с бинарниками prot
 Задача публикует клиентские JAR в `build/compatibility-repository` и проверяет их
 как внешние зависимости без доступа к серверному classpath. Проверяются оба механизма
 регистрации, отсутствие лишних зависимостей, binding, отключение/переопределение клиента,
-валидация конфигурации, все три RPC с токеном, TLS, deadline и закрытие соединения.
+валидация конфигурации, все четыре RPC с токеном, TLS, deadline и закрытие соединения.
 Для интеграционной проверки с PostgreSQL включите `FEATURIFY_DB_TESTS=true` и запустите
 `./gradlew test`. Используйте отдельную тестовую БД через `DB_URL` / `DB_USERNAME` /
 `DB_PASSWORD`: Flyway применяет V1 автоматически, а тестовые данные откатываются.
@@ -646,3 +652,68 @@ Namespace определяется токеном, как при чтении о
 
 Схема элементов и расширение полей аудита включены в миграцию V1.
 Для базы с уже применённой прежней V1 действуют описанные выше требования пересоздания.
+
+## Payload toggles (JSON)
+
+`PAYLOAD` хранит JSON-конфигурацию: объект, массив, строку, число, boolean или JSON `null`.
+Смысл соответствует [JSON-фичам FeatureHub](https://docs.featurehub.io/featurehub/latest/features.html).
+При создании обязательно поле `payloadValue` — **строка с JSON**, максимум 65536 символов
+до и после нормализации. Пустые документы, повторяющиеся ключи, комментарии и несколько
+документов подряд отклоняются. Числа сохраняются без округления через `double`.
+
+Создание через `POST /api/v1/features?namespace=blue`:
+
+```json
+{
+  "key": "checkout-config",
+  "type": "PAYLOAD",
+  "payloadValue": "{\"timeoutMs\":1500,\"theme\":{\"accent\":\"blue\"},\"methods\":[\"card\",\"wire\"]}"
+}
+```
+
+REST чтение (включая list и resolve) возвращает **разобранный JSON** в `value`:
+
+```json
+{
+  "group": null,
+  "key": "checkout-config",
+  "type": "PAYLOAD",
+  "value": {"timeoutMs":1500,"theme":{"accent":"blue"},"methods":["card","wire"]},
+  "enumOptions": null,
+  "version": 0
+}
+```
+
+PATCH заменяет документ целиком; объединения объектов нет:
+
+```json
+{"version":0,"payloadValue":"{\"timeoutMs\":3000}"}
+```
+
+Пропущенное поле / `payloadValue: null` не изменяет значение при PATCH;
+`payloadValue: "null"` устанавливает JSON `null`. Отдельного состояния «не задано» нет.
+Поля `booleanValue`, `enumValue`, `enumOptions` и `vectorValues` не задаются для PAYLOAD.
+Тип существующей фичи неизменяем. Версия, транзакции, аудит, namespace и права управления
+сохраняют общие правила. Пробелы и порядок ключей объектов нормализуются, поэтому
+их изменение не создаёт записи об изменении значения в аудите.
+
+gRPC `GetPayloadFeature(GetFeatureRequest)` возвращает `PayloadFeatureResponse`:
+`value` — строка с JSON, `version` — версия всей фичи. Несовпадение типа возвращает
+`FAILED_PRECONDITION`; авторизация и ошибки соответствуют остальным RPC.
+
+```java
+PayloadFeatureResponse response = client.getPayloadFeature("checkout-config", "checkout");
+String json = response.getValue();
+```
+
+Starter автоматически создаёт `ru.a1pha1337.featurify.client.service.PayloadFeatureService`
+с методами `getValue(key[, group])` и `getFeature(key[, group])`. Кеш, TTL, default group,
+обход ошибочных загрузок и возможность переопределения bean работают по общему контракту.
+JSON разбирается выбранной библиотекой приложения; новые зависимости для этого в клиент не добавлены.
+Demo: `/diagnostics/features/payload/checkout-config?cached=false`.
+
+Оператор поддерживает PAYLOAD в Global и в группах, включая `Managed` / `InitialOnly`;
+пример YAML и порядок обновления CRD — в [README оператора](featurify-k8s-operator/README.md).
+Схема `feature_payload_value` включена в существующую MVP-миграцию V1 для новой базы.
+Для уже применённой V1 требуется описанное выше пересоздание базы; обновление существующих
+данных этой миграцией не выполняется.

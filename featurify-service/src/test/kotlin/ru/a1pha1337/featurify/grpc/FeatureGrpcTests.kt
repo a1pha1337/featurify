@@ -27,6 +27,7 @@ import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.Namespace
 import ru.a1pha1337.featurify.domain.NamespaceAccessToken
+import ru.a1pha1337.featurify.domain.PayloadValue
 import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.dto.CreateAccessTokenRequest
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
@@ -168,6 +169,27 @@ class FeatureGrpcTests {
         assertThat(stub(blueToken, spoofed).getBooleanFeature(request()).value).isFalse()
         assertThat(stub().getEnumFeature(request("", "color")).value).isEqualTo("GREEN")
         expect(Status.Code.NOT_FOUND) { stub(redToken).getEnumFeature(request("", "color")) }
+    }
+
+    @Test
+    fun `payload preserves JSON version authentication and namespace isolation`() {
+        val payload =
+            Feature(
+                namespaceId = blue.id!!,
+                key = "config",
+                value = PayloadValue("""{"large":12345678901234567890,"nested":[true,null]}"""),
+                version = 12,
+                createdAt = now,
+                updatedAt = now,
+            )
+        every { features.findByNamespaceIdAndGroupIdIsNullAndKey(blue.id!!, "config") } returns payload
+        assertThat(stub().getPayloadFeature(request("", "config")).value).isEqualTo(payload.valueAsString())
+        assertThat(stub().getPayloadFeature(request("", "config")).version).isEqualTo(12)
+        expect(Status.Code.NOT_FOUND) { stub(redToken).getPayloadFeature(request("", "config")) }
+        expect(Status.Code.UNAUTHENTICATED) { stub(null).getPayloadFeature(request("", "config")) }
+        expect(Status.Code.FAILED_PRECONDITION) { stub().getPayloadFeature(request("", "color")) }
+        expect(Status.Code.FAILED_PRECONDITION) { stub().getBooleanFeature(request("", "config")) }
+        expect(Status.Code.INVALID_ARGUMENT) { stub().getPayloadFeature(request("", "bad key")) }
     }
 
     @Test

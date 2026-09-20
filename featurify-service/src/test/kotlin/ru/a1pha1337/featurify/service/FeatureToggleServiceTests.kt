@@ -18,6 +18,7 @@ import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.domain.PayloadValue
 import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.dto.CreateFeatureGroupRequest
 import ru.a1pha1337.featurify.dto.CreateFeatureRequest
@@ -82,6 +83,46 @@ class FeatureToggleServiceTests {
             }.also { assertThat(it).isNotNull() }
 
         assertThat(exception.violations.single().first).isEqualTo("enumValue")
+        verify(exactly = 0) { featureRepository.save(any()) }
+    }
+
+    @Test
+    fun `payload creates structured public value and replaces the whole document with audit`() {
+        every { auditRepository.save(any()) } answers { firstArg() }
+        every { featureRepository.save(any()) } answers { firstArg<Feature>().copy(id = featureId, version = 0) }
+        val created = service.createFeature("blue", CreateFeatureRequest("config", FeatureType.PAYLOAD, payloadValue = """{"old":1}"""))
+        assertThat(created.value.toString()).isEqualTo("""{"old":1}""")
+        val current = booleanFeature(version = 0).copy(key = "config", value = PayloadValue("""{"old":1}"""))
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, "config") } returns current
+        every { featureRepository.save(any()) } answers { firstArg<Feature>().copy(version = 1) }
+        val changed = service.patchFeature("blue", "config", null, PatchFeatureRequest(0, payloadValue = "[true,null]"))
+        assertThat(changed.value.toString()).isEqualTo("[true,null]")
+        assertThat(changed.version).isEqualTo(1)
+        verify { auditRepository.save(match { it.oldValue == """{"old":1}""" && it.newValue == "[true,null]" }) }
+        assertThatThrownBy { service.patchFeature("blue", "config", null, PatchFeatureRequest(9, payloadValue = "{}")) }
+            .isInstanceOf(ConflictException::class.java)
+    }
+
+    @Test
+    fun `payload validates creation and patch and rejects values on other types`() {
+        listOf(null, "", "{", "{} []", "{\"a\":1,\"a\":2}", "x".repeat(65537)).forEach { json ->
+            assertThatThrownBy { service.createFeature("blue", CreateFeatureRequest("config", FeatureType.PAYLOAD, payloadValue = json)) }
+                .isInstanceOf(DomainValidationException::class.java)
+        }
+        assertThatThrownBy {
+            service.createFeature("blue", CreateFeatureRequest("config", FeatureType.PAYLOAD, payloadValue = "{}", booleanValue = false))
+        }.isInstanceOf(DomainValidationException::class.java)
+        assertThatThrownBy {
+            service.createFeature("blue", CreateFeatureRequest("config", FeatureType.BOOLEAN, payloadValue = "{}", booleanValue = false))
+        }.isInstanceOf(DomainValidationException::class.java)
+        val current = booleanFeature(version = 0)
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns current
+        assertThatThrownBy { service.patchFeature("blue", current.key, null, PatchFeatureRequest(0, payloadValue = "{}")) }
+            .isInstanceOf(DomainValidationException::class.java)
+        every { featureRepository.findByNamespaceIdAndGroupIdIsNullAndKey(namespaceId, current.key) } returns
+            current.copy(value = PayloadValue("{}"))
+        assertThatThrownBy { service.patchFeature("blue", current.key, null, PatchFeatureRequest(0, payloadValue = "broken")) }
+            .isInstanceOf(DomainValidationException::class.java)
         verify(exactly = 0) { featureRepository.save(any()) }
     }
 

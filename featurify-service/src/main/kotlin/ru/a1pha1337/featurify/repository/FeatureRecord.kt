@@ -8,6 +8,7 @@ import ru.a1pha1337.featurify.domain.BooleanValue
 import ru.a1pha1337.featurify.domain.EnumValue
 import ru.a1pha1337.featurify.domain.Feature
 import ru.a1pha1337.featurify.domain.FeatureType
+import ru.a1pha1337.featurify.domain.PayloadValue
 import ru.a1pha1337.featurify.domain.VectorValue
 import java.time.Instant
 import java.util.UUID
@@ -32,6 +33,8 @@ data class FeatureRecord(
     val enumOptions: List<EnumOptionRecord> = emptyList(),
     @MappedCollection(idColumn = "feature_id", keyColumn = "element")
     val vectorElements: Map<String, VectorElementRecord> = emptyMap(),
+    @MappedCollection(idColumn = "feature_id")
+    val payloadValue: PayloadValueRecord? = null,
 ) {
     fun toDomain(): Feature =
         Feature(
@@ -48,6 +51,7 @@ data class FeatureRecord(
                     FeatureType.BOOLEAN -> BooleanValue(checkNotNull(booleanValue).enabled)
                     FeatureType.ENUM -> EnumValue(checkNotNull(enumValue).value, enumOptions.map { it.value })
                     FeatureType.VECTOR -> VectorValue(vectorElements.mapValues { it.value.enabled })
+                    FeatureType.PAYLOAD -> PayloadValue(checkNotNull(payloadValue).value)
                 },
         )
 
@@ -67,6 +71,7 @@ data class FeatureRecord(
                 enumValue = (feature.value as? EnumValue)?.let { EnumValueRecord(it.selected) },
                 enumOptions = (feature.value as? EnumValue)?.options?.map { EnumOptionRecord(it) } ?: emptyList(),
                 vectorElements = (feature.value as? VectorValue)?.elements?.mapValues { VectorElementRecord(it.value) } ?: emptyMap(),
+                payloadValue = (feature.value as? PayloadValue)?.let { PayloadValueRecord(it.json) },
             )
     }
 }

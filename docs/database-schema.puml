@@ -114,6 +114,13 @@ entity "feature_audit_log" as featureAudit {
     * changed_at : TIMESTAMPTZ <<NN>>
 }
 
+entity "feature_payload_value" as payloadValue {
+    * feature_id : UUID <<PK/FK>>
+    --
+    feature_type : VARCHAR(16) <<генер.>>
+    * value : TEXT <<NN, JSON>>
+}
+
 entity "namespace_manifest" as manifestTable {
     * id : UUID <<PK>>
     --
@@ -148,6 +155,13 @@ featureTable "1" -- "0..*" enumOption : "(id, type)\nтип = ENUM\nON DELETE CA
 featureTable "1" -- "0..1" enumValue : "(id, type)\nтип = ENUM\nON DELETE CASCADE"
 enumOption "1" -- "0..1" enumValue : "(feature_id, value)\nDEFERRABLE"
 featureTable "1" -- "0..*" vectorElement : "(id, type)\nтип = VECTOR\nON DELETE CASCADE"
+featureTable "1" -- "0..1" payloadValue : "(id, type)\nтип = PAYLOAD\nON DELETE CASCADE"
+
+note right of payloadValue
+    Полный JSON-документ до 65536 символов с уникальными ключами.
+    TEXT сохраняет точность чисел; CHECK проверяет синтаксис JSON.
+    JSON null — допустимое значение; SQL NULL запрещён.
+end note
 
 namespaceTable "1" -- "0..*" featureAudit : "namespace_id\nON DELETE CASCADE"
 featureTable "1" -- "0..*" featureAudit : "feature_id\nON DELETE CASCADE"
@@ -169,7 +183,7 @@ end note
 note bottom of vectorElement
     Отложенные constraint-триггеры проверяют наличие полного typed value
     в конце транзакции: BOOLEAN — 1 значение, ENUM — выбранный вариант,
-    VECTOR — от 1 до 100 элементов.
+    VECTOR — от 1 до 100 элементов, PAYLOAD — 1 JSON-документ.
 end note
 
 note bottom of manifestTable

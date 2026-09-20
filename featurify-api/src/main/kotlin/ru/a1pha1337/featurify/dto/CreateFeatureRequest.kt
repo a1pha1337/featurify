@@ -33,4 +33,6 @@ data class CreateFeatureRequest(
         String,
         @NotNull Boolean,
     > = emptyMap(),
+    @field:Size(max = 65536)
+    val payloadValue: String? = null,
 )

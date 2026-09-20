@@ -11,9 +11,8 @@ class ActorProvider {
     fun currentUsername(): String {
         val authentication: Authentication? = SecurityContextHolder.getContext().authentication
         if (authentication == null || !authentication.isAuthenticated) return "system"
-        val principal = authentication.principal
-        return when (principal) {
-            is OAuth2User -> principal.getAttribute<String>("preferred_username") ?: authentication.name
+        return when (val principal = authentication.principal) {
+            is OAuth2User -> principal.getAttribute("preferred_username") ?: authentication.name
             is Jwt -> principal.getClaimAsString("preferred_username") ?: authentication.name
             else -> authentication.name
         }

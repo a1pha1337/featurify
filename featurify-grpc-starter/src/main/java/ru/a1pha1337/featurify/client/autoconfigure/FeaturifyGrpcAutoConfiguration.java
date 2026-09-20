@@ -11,6 +11,7 @@ import ru.a1pha1337.featurify.client.FeaturifyClient;
 import ru.a1pha1337.featurify.client.GrpcFeaturifyClient;
 import ru.a1pha1337.featurify.client.service.BooleanFeatureService;
 import ru.a1pha1337.featurify.client.service.EnumFeatureService;
+import ru.a1pha1337.featurify.client.service.PayloadFeatureService;
 import ru.a1pha1337.featurify.client.service.VectorFeatureService;
 
 import java.io.IOException;
@@ -46,6 +47,13 @@ public class FeaturifyGrpcAutoConfiguration {
     @ConditionalOnMissingBean(EnumFeatureService.class)
     public EnumFeatureService enumFeatureService(FeaturifyClient client, FeaturifyGrpcProperties properties) {
         return new EnumFeatureService(client, properties.getCache().getTtl(), properties.getCache().getMaximumSize(),
+                properties.getDefaultGroup());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(PayloadFeatureService.class)
+    public PayloadFeatureService payloadFeatureService(FeaturifyClient client, FeaturifyGrpcProperties properties) {
+        return new PayloadFeatureService(client, properties.getCache().getTtl(), properties.getCache().getMaximumSize(),
                 properties.getDefaultGroup());
     }
 

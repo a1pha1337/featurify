@@ -168,6 +168,7 @@ class MainView(
                     FeatureType.BOOLEAN -> "Boolean"
                     FeatureType.ENUM -> "Enum"
                     FeatureType.VECTOR -> "Vector"
+                    FeatureType.PAYLOAD -> "Payload"
                 }
             }.setHeader("Type")
             .setWidth("110px")
@@ -248,6 +249,15 @@ class MainView(
         val namespaceKey = namespaceSelect.value?.key ?: return Span()
         val valueManaged = feature.valueManaged
         var current = feature
+        if (feature.type == FeatureType.PAYLOAD) {
+            return TextArea("JSON value").apply {
+                value = feature.value.toString()
+                isReadOnly = true
+                markManagedValue(this, valueManaged)
+                helperText = "Use Edit to view or update the complete JSON document"
+                setWidthFull()
+            }
+        }
         if (feature.type == FeatureType.VECTOR) {
             val elements =
                 VerticalLayout().apply {
@@ -693,6 +703,11 @@ class MainView(
                 setItems(emptyList<String>())
             }
         val vectorEnabled = CheckboxGroup<String>("Enabled elements")
+        val payloadValue =
+            TextArea("JSON value").apply {
+                maxLength = 65536
+                helperText = "A complete JSON document; saving replaces the entire value"
+            }
         val availableOptions = linkedSetOf<String>()
         enumOptions.addCustomValueSetListener { event ->
             val option = event.detail.trim()
@@ -726,17 +741,18 @@ class MainView(
             enumOptions.isVisible = isEnum || type.value == FeatureType.VECTOR
             enumOptions.label = if (type.value == FeatureType.VECTOR) "Elements" else "Allowed values"
             vectorEnabled.isVisible = type.value == FeatureType.VECTOR
+            payloadValue.isVisible = type.value == FeatureType.PAYLOAD
         }
         type.addValueChangeListener { updateFields() }
         updateFields()
-        dialog.add(form(key, group, type, description, booleanValue, enumOptions, enumValue, vectorEnabled))
+        dialog.add(form(key, group, type, description, booleanValue, enumOptions, enumValue, vectorEnabled, payloadValue))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(
             Button("Create") {
                 runUiAction {
                     val selectedType = type.value
                     val options = availableOptions.filter { it in enumOptions.value }
-                    if (selectedType != FeatureType.BOOLEAN && options.isEmpty()) {
+                    if (selectedType in listOf(FeatureType.ENUM, FeatureType.VECTOR) && options.isEmpty()) {
                         enumOptions.isInvalid = true
                         enumOptions.errorMessage = "Add at least one allowed value"
                         return@runUiAction
@@ -750,6 +766,7 @@ class MainView(
                                 group = group.value?.key,
                                 description = description.value,
                                 booleanValue = booleanValue.value.takeIf { selectedType == FeatureType.BOOLEAN },
+                                payloadValue = payloadValue.value.takeIf { selectedType == FeatureType.PAYLOAD },
                                 enumValue = enumValue.value.takeIf { selectedType == FeatureType.ENUM },
                                 enumOptions = options.takeIf { selectedType == FeatureType.ENUM } ?: emptyList(),
                                 vectorValues =
@@ -923,7 +940,15 @@ class MainView(
             }
         group.isEnabled = !feature.managed
         description.isReadOnly = feature.managed
-        dialog.add(form(group, description, booleanValue, enumValue, vectorEnabled))
+        val payloadValue =
+            TextArea("JSON value").apply {
+                value = if (feature.type == FeatureType.PAYLOAD) feature.value.toString() else ""
+                isVisible = feature.type == FeatureType.PAYLOAD
+                isReadOnly = feature.valueManaged
+                maxLength = 65536
+                helperText = "Saving replaces the entire JSON document"
+            }
+        dialog.add(form(group, description, booleanValue, enumValue, vectorEnabled, payloadValue))
         dialog.footer.add(Button("Cancel") { dialog.close() })
         dialog.footer.add(
             Button("Save") {
@@ -939,6 +964,7 @@ class MainView(
                                 version = feature.version,
                                 description = description.value,
                                 booleanValue = booleanValue.value.takeIf { feature.type == FeatureType.BOOLEAN },
+                                payloadValue = payloadValue.value.takeIf { feature.type == FeatureType.PAYLOAD },
                                 enumValue = enumValue.value.takeIf { feature.type == FeatureType.ENUM },
                                 vectorValues =
                                     if (feature.type ==

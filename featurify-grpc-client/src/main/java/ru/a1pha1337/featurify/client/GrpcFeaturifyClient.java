@@ -8,6 +8,7 @@ import io.grpc.netty.shaded.io.netty.handler.ssl.SslContextBuilder;
 import io.grpc.stub.MetadataUtils;
 import ru.a1pha1337.featurify.grpc.proto.BooleanFeatureResponse;
 import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse;
+import ru.a1pha1337.featurify.grpc.proto.PayloadFeatureResponse;
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc;
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest;
 import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest;
@@ -88,6 +89,11 @@ public final class GrpcFeaturifyClient implements FeaturifyClient, AutoCloseable
     @Override
     public EnumFeatureResponse getEnumFeature(String key, String group) {
         return stub.withDeadlineAfter(timeoutNanos, TimeUnit.NANOSECONDS).getEnumFeature(request(key, group));
+    }
+
+    @Override
+    public PayloadFeatureResponse getPayloadFeature(String key, String group) {
+        return stub.withDeadlineAfter(timeoutNanos, TimeUnit.NANOSECONDS).getPayloadFeature(request(key, group));
     }
 
     @Override

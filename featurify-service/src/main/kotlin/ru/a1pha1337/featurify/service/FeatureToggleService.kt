@@ -13,6 +13,7 @@ import ru.a1pha1337.featurify.domain.FeatureAuditLog
 import ru.a1pha1337.featurify.domain.FeatureGroup
 import ru.a1pha1337.featurify.domain.FeatureType
 import ru.a1pha1337.featurify.domain.Namespace
+import ru.a1pha1337.featurify.domain.PayloadValue
 import ru.a1pha1337.featurify.domain.VectorValue
 import ru.a1pha1337.featurify.dto.AdminFeatureResponse
 import ru.a1pha1337.featurify.dto.AuditLogResponse
@@ -181,6 +182,7 @@ class FeatureToggleService(
                             FeatureType.BOOLEAN -> BooleanValue(request.booleanValue!!)
                             FeatureType.ENUM -> EnumValue(request.enumValue!!, request.enumOptions)
                             FeatureType.VECTOR -> VectorValue(request.vectorValues)
+                            FeatureType.PAYLOAD -> PayloadValue(checkNotNull(request.payloadValue))
                         },
                     groupId = group?.id,
                     description = request.description,
@@ -361,6 +363,7 @@ class FeatureToggleService(
                     value.copy(selected = selected)
                 }
                 is VectorValue -> value.copy(elements = value.elements + (request.vectorValues ?: emptyMap()))
+                is PayloadValue -> request.payloadValue?.let { PayloadValue(it) } ?: value
             }
         val changed =
             current.copy(
@@ -432,10 +435,19 @@ class FeatureToggleService(
         request: CreateFeatureRequest,
         type: FeatureType,
     ) {
+        if (type != FeatureType.PAYLOAD && request.payloadValue != null) {
+            throw validation("payloadValue", "is only allowed for PAYLOAD")
+        }
         if (type != FeatureType.VECTOR && request.vectorValues.isNotEmpty()) {
             throw validation("vectorValues", "is only allowed for VECTOR")
         }
         when (type) {
+            FeatureType.PAYLOAD -> {
+                if (request.booleanValue != null) throw validation("booleanValue", "is only allowed for BOOLEAN")
+                if (request.enumValue != null) throw validation("enumValue", "is only allowed for ENUM")
+                if (request.enumOptions.isNotEmpty()) throw validation("enumOptions", "is only allowed for ENUM")
+                validatePayload(request.payloadValue ?: throw validation("payloadValue", "is required for PAYLOAD"))
+            }
             FeatureType.VECTOR -> {
                 if (request.booleanValue != null) throw validation("booleanValue", "is only allowed for BOOLEAN")
                 if (request.enumValue != null) throw validation("enumValue", "is only allowed for ENUM")
@@ -476,12 +488,31 @@ class FeatureToggleService(
         }
     }
 
+    private fun validatePayload(json: String) {
+        try {
+            PayloadValue(json)
+        } catch (exception: IllegalArgumentException) {
+            throw validation("payloadValue", "must be a valid JSON document of at most 65536 characters")
+        } catch (exception: tools.jackson.core.JacksonException) {
+            throw validation("payloadValue", "must be a valid JSON document of at most 65536 characters")
+        }
+    }
+
     private fun validatePatch(
         current: Feature,
         request: PatchFeatureRequest,
     ) {
-        if (request.description == null && request.booleanValue == null && request.enumValue == null && request.vectorValues == null) {
+        if (request.description == null &&
+            request.booleanValue == null &&
+            request.enumValue == null &&
+            request.vectorValues == null &&
+            request.payloadValue == null
+        ) {
             throw validation("request", "must change value and/or description")
+        }
+        request.payloadValue?.let {
+            if (current.type != FeatureType.PAYLOAD) throw validation("payloadValue", "is only allowed for PAYLOAD")
+            validatePayload(it)
         }
         request.vectorValues?.let { values ->
             if (current.type != FeatureType.VECTOR) throw validation("vectorValues", "is only allowed for VECTOR")

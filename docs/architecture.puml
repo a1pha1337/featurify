@@ -138,4 +138,11 @@ note bottom of postgres
   Each request reads the current PostgreSQL state.
 end note
 
+note bottom of grpcApi
+  PAYLOAD: GetPayloadFeature returns JSON text and version.
+  PayloadFeatureService provides the usual client TTL cache.
+  REST reads return a structured JSON value; writes and CRs use payloadValue text.
+  Managed replaces the whole document; InitialOnly preserves runtime edits.
+end note
+
 @enduml

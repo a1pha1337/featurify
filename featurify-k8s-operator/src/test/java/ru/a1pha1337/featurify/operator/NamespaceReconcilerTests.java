@@ -31,6 +31,8 @@ class NamespaceReconcilerTests {
     void exampleDeserializesTypedValuesAndRoundTrips() throws Exception {
         var resource = resource();
         assertThat(resource.getSpec().features().getFirst().booleanValue()).isFalse();
+        assertThat(resource.getSpec().features().get(1).type()).isEqualTo(NamespaceSpec.FeatureType.PAYLOAD);
+        assertThat(resource.getSpec().features().get(1).payloadValue()).contains("\"theme\":{\"accent\":\"blue\"}");
         assertThat(resource.getSpec().groups().getFirst().features().get(1).vectorValues()).containsEntry("CASH", false);
         assertThat(Serialization.unmarshal(Serialization.asJson(resource), FeaturifyNamespace.class).getSpec()).isEqualTo(resource.getSpec());
     }

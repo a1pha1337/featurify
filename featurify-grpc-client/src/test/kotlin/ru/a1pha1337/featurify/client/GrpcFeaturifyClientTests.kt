@@ -26,6 +26,7 @@ import ru.a1pha1337.featurify.grpc.proto.EnumFeatureResponse
 import ru.a1pha1337.featurify.grpc.proto.FeatureServiceGrpc
 import ru.a1pha1337.featurify.grpc.proto.GetFeatureRequest
 import ru.a1pha1337.featurify.grpc.proto.GetVectorFeatureRequest
+import ru.a1pha1337.featurify.grpc.proto.PayloadFeatureResponse
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
@@ -134,6 +135,21 @@ class GrpcFeaturifyClientTests {
                             )
                             observer.onCompleted()
                         }
+
+                        override fun getPayloadFeature(
+                            request: GetFeatureRequest,
+                            observer: StreamObserver<PayloadFeatureResponse>,
+                        ) {
+                            requests.add(request)
+                            observer.onNext(
+                                PayloadFeatureResponse
+                                    .newBuilder()
+                                    .setValue("[true,null,12345678901234567890]")
+                                    .setVersion(10)
+                                    .build(),
+                            )
+                            observer.onCompleted()
+                        }
                     },
                 ).build()
                 .start()
@@ -173,6 +189,23 @@ class GrpcFeaturifyClientTests {
                 .build(),
         )
         assertThat(authorization).containsExactly("Bearer test-token", "Bearer test-token", "Bearer test-token")
+    }
+
+    @Test
+    fun `payload returns raw JSON without numeric conversion and preserves group and authentication`() {
+        val payload = client.getPayloadFeature("config", "checkout")
+        assertThat(payload.value).isEqualTo("[true,null,12345678901234567890]")
+        assertThat(payload.version).isEqualTo(10)
+        client.getPayloadFeature("config")
+        assertThat(requests).containsExactly(
+            GetFeatureRequest
+                .newBuilder()
+                .setKey("config")
+                .setGroup("checkout")
+                .build(),
+            GetFeatureRequest.newBuilder().setKey("config").build(),
+        )
+        assertThat(authorization).containsExactly("Bearer test-token", "Bearer test-token")
     }
 
     @Test
