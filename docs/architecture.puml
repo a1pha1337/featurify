@@ -81,7 +81,7 @@ node "Featurify JVM\nSpring Boot application" as featurifyJvm {
 }
 
 node "Kubernetes cluster" as cluster {
-    component "featurify-k8s-operator\nJava Operator SDK reconciler" as operator #E8F1FF
+    component "featurify-k8s-operator\nSpring Boot + Java Operator SDK reconciler" as operator #E8F1FF
     artifact "FeaturifyNamespace CRD\n(namespace spec + status)" as crd #F8FAFC
 }
 

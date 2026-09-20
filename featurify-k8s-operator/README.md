@@ -8,9 +8,18 @@
 API Featurify. Один Kubernetes CR (Custom Resource) описывает один namespace Featurify:
 его название, глобальные фичи, группы, типы и значения фич.
 
-Оператор запускается отдельным процессом на Java 25. Он не зависит от Spring,
-серверных модулей или клиентских gRPC-библиотек. Версия JOSDK указана в `build.gradle.kts`.
+Оператор запускается отдельным Spring Boot приложением на Java 25, без HTTP-сервера.
+Он не зависит от серверных модулей или клиентских gRPC-библиотек. Spring Boot starter
+регистрирует reconciler и управляет запуском и остановкой JOSDK; прикладные зависимости
+создаются через Spring, настройки связываются и проверяются через `@ConfigurationProperties`.
 Сервер Featurify должен содержать административный API оператора из этой же версии проекта.
+
+Используются Spring Boot 4.1.1, `operator-framework-spring-boot-starter` 6.7.0,
+JOSDK 5.6.1 и Fabric8 7.9.0. Опубликованный starter 6.7.0 по умолчанию использует
+JOSDK 5.5.0 и Fabric8 7.8.0, поэтому актуальные версии SDK и Fabric8 закреплены отдельно
+в `build.gradle.kts`. Совместимость этой комбинации проверяется тестом запуска Spring Boot
+с тестовым Kubernetes API, применением CR, изоляцией namespace, finalizer и остановкой клиента.
+Версия Spring Boot берётся из общей конфигурации сборки.
 
 ## Быстрый пример
 
@@ -271,6 +280,19 @@ kubectl -n applications delete featurifynamespace checkout
 
 Настройте переменные, kubeconfig и выполните из корня `.\gradlew.bat :featurify-k8s-operator:run`.
 Fabric8 использует kubeconfig локально и ServiceAccount внутри Pod.
+Переменные окружения сохранены в `src/main/resources/application.yaml` как значения
+настроек `featurify.operator.*`. Отсутствующие обязательные параметры, некорректные URL,
+cluster ID, Kubernetes namespace или интервал приводят к ошибке запуска.
+Один процесс наблюдает ровно один Kubernetes namespace; пустые значения, списки и
+специальное значение JOSDK для наблюдения всех namespace не допускаются в `WATCH_NAMESPACE`.
+Настройки `javaoperatorsdk.*` задают область наблюдения reconciler `featurify-namespace`,
+отключают SSA для primary resource и автоматическую установку CRD. CRD по-прежнему
+устанавливается отдельно через `kubectl`; дополнительные кластерные права оператору не нужны.
+`spring.main.web-application-type=none` отключает HTTP-сервер, а `spring.main.keep-alive=true`
+удерживает процесс до остановки. Gradle `run`/`installDist` и Docker entrypoint сохраняются.
+При ошибке запуска наблюдения Kubernetes API процесс завершается с ненулевым кодом.
+Windows-скрипт дистрибутива использует `lib/*` в classpath, чтобы список зависимостей
+не превышал ограничение длины командной строки `cmd.exe`.
 HTTP connect timeout — 10 секунд, token timeout — 20 секунд, Featurify timeout — 30 секунд.
 После HTTP 401 токен обновляется с однократным повтором запроса. Redirects не выполняются.
 Секреты и токены не включаются в статус или сообщения ошибок.
@@ -308,7 +330,10 @@ $env:DB_PASSWORD = "featurify_test"
 .\gradlew.bat :featurify-service:test
 ```
 
-Java-тесты проверяют чтение YAML, HTTP/OAuth, статусы и finalizer. PostgreSQL-тесты
+Java-тесты проверяют чтение YAML, HTTP/OAuth, статусы и finalizer, валидацию настроек,
+запуск и остановку Spring Boot приложения с тестовым Kubernetes API и наблюдение только
+за выбранным Kubernetes namespace. Для этих тестов настоящий кластер и PostgreSQL не нужны.
+PostgreSQL-тесты
 проверяют атомарность, идемпотентность, аудит, pruning, adoption, политики значения,
 защиту ручных данных, авторизацию и устаревшие запросы. Они включаются только через
 `FEATURIFY_DB_TESTS=true`. Обычный `test` не подтверждает их выполнение.

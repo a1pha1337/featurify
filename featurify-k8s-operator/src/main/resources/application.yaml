@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: featurify-k8s-operator
+  main:
+    web-application-type: none
+    keep-alive: true
+
+featurify:
+  operator:
+    watch-namespace: ${WATCH_NAMESPACE:}
+    cluster-id: ${FEATURIFY_CLUSTER_ID:}
+    url: ${FEATURIFY_URL:}
+    token-url: ${KEYCLOAK_TOKEN_URL:}
+    client-id: ${KEYCLOAK_CLIENT_ID:}
+    client-secret-file: ${KEYCLOAK_CLIENT_SECRET_FILE:}
+    reconcile-interval-seconds: ${RECONCILE_INTERVAL_SECONDS:30}
+
+javaoperatorsdk:
+  use-ssa-to-patch-primary-resource: false
+  crd:
+    apply-on-startup: false
+  reconcilers:
+    featurify-namespace:
+      namespaces:
+        - ${featurify.operator.watch-namespace}

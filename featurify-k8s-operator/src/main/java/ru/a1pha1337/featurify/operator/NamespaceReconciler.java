@@ -12,7 +12,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 
-@ControllerConfiguration(finalizerName = "featurify.io/namespace-cleanup")
+@ControllerConfiguration(name = "featurify-namespace", finalizerName = "featurify.io/namespace-cleanup")
 public final class NamespaceReconciler implements Reconciler<FeaturifyNamespace>, Cleaner<FeaturifyNamespace> {
     private final ManifestClient client;
     private final Duration interval;

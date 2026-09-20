@@ -35,7 +35,7 @@
 | `featurify-grpc-client`  | Java-клиент без Spring: авторизация, соединение, TLS, deadline                               |
 | `featurify-grpc-starter` | Общая автоконфигурация клиента для Spring Boot 2, 3 и 4                                      |
 | `featurify-demo`         | Demo-приложение на Spring Boot 4: HTTP-диагностика gRPC-клиента, кеша и групп                 |
-| `featurify-k8s-operator` | Java Operator SDK: декларативное управление namespace через Kubernetes CR |
+| `featurify-k8s-operator` | Spring Boot + Java Operator SDK: декларативное управление namespace через Kubernetes CR |
 
 Оператор устанавливается отдельно; CRD, Deployment/RBAC, пример и описание всех сценариев —
 в [featurify-k8s-operator/README.md](featurify-k8s-operator/README.md).
